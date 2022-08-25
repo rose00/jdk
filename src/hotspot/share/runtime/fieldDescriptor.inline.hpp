@@ -55,8 +55,10 @@ inline FieldInfo* fieldDescriptor::field() const {
 }
 
 inline int fieldDescriptor::offset()                    const    { return field()->offset(); }
-inline bool fieldDescriptor::has_initial_value()        const    { return field()->initval_index() != 0; }
-inline int fieldDescriptor::initial_value_index()       const    { return field()->initval_index(); }
+inline bool fieldDescriptor::has_initial_value()        const    { return field()->initval_index() != 0 && !is_lazy_value(); }
+inline int fieldDescriptor::initial_value_index()       const    { return is_lazy_value() ? 0 : field()->initval_index(); }
+
+inline int fieldDescriptor::lazy_value_index()          const    { return !is_lazy_value() ? 0 : field()->initval_index(); }
 
 inline void fieldDescriptor::update_klass_field_access_flag() {
   InstanceKlass* ik = field_holder();

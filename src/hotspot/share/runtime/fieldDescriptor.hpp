@@ -62,7 +62,7 @@ class fieldDescriptor {
 
   AccessFlags access_flags()      const    { return _access_flags; }
   oop loader()                    const;
-  // Offset (in words) of field from start of instanceOop / Klass*
+  // Offset (in bytes) of field from start of instanceOop / Klass*
   inline int offset()             const;
   Symbol* generic_signature()     const;
   int index()                     const    { return _index; }
@@ -78,6 +78,9 @@ class fieldDescriptor {
   jfloat float_initial_value()    const;
   jdouble double_initial_value()  const;
   oop string_initial_value(TRAPS) const;
+
+  // Lazy field "condy" value
+  inline int lazy_value_index()   const;
 
   // Field signature type
   inline BasicType field_type() const;
@@ -95,6 +98,7 @@ class fieldDescriptor {
   bool is_transient()             const    { return access_flags().is_transient(); }
 
   bool is_synthetic()             const    { return access_flags().is_synthetic(); }
+  bool is_lazy_value()            const    { return access_flags().is_lazy_value(); }
 
   bool is_field_access_watched()  const    { return access_flags().is_field_access_watched(); }
   bool is_field_modification_watched() const

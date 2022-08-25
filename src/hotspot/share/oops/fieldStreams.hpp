@@ -203,6 +203,9 @@ class JavaFieldStream : public FieldStreamBase {
     assert(!field()->is_internal(), "regular only");
     return field()->set_initval_index(index);
   }
+  bool is_lazy_value() const {
+    return field()->is_lazy_value();
+  }
 };
 
 

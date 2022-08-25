@@ -178,6 +178,7 @@
   template(tag_nest_members,                          "NestMembers")                              \
   template(tag_nest_host,                             "NestHost")                                 \
   template(tag_constant_value,                        "ConstantValue")                            \
+  template(tag_lazy_value,                            "LazyValue")                                \
   template(tag_code,                                  "Code")                                     \
   template(tag_exceptions,                            "Exceptions")                               \
   template(tag_line_number_table,                     "LineNumberTable")                          \
