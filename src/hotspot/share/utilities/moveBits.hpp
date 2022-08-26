@@ -30,71 +30,78 @@
 #include "utilities/globalDefinitions.hpp"
 #include <type_traits>
 
-template <typename T, int S>
-struct ReverseImpl {
+template <typename T>
+struct ReverseBitsImpl {
  private:
-  static const uint64_t rep_5555 = CONST64(0x5555555555555555);
-  static const uint64_t rep_3333 = CONST64(0x3333333333333333);
-  static const uint64_t rep_0F0F = CONST64(0x0F0F0F0F0F0F0F0F);
-  static const uint64_t rep_00FF = CONST64(0x00FF00FF00FF00FF);
-  static const uint64_t rep_FFFF = CONST64(0x0000FFFF0000FFFF);
+  static const int NB = sizeof(T) * BitsPerByte;
+  static_assert((NB == 8) || (NB == 16) || (NB == 32) || (NB == 64),
+                "unsupported bit width");
+
+  // These masks are specified in 64 bits but are down-cast to size for use.
+  static const T rep_5555 = (T) CONST64(0x5555555555555555);
+  static const T rep_3333 = (T) CONST64(0x3333333333333333);
+  static const T rep_0F0F = (T) CONST64(0x0F0F0F0F0F0F0F0F);
+  static const T rep_00FF = (T) CONST64(0x00FF00FF00FF00FF);
+  static const T rep_FFFF = (T) CONST64(0x0000FFFF0000FFFF);
 
  public:
 
-  static constexpr T reverse_bits_in_bytes_template(uint64_t x) {
+  static constexpr T reverse_bits_in_bytes(uint64_t x) {
     // Based on Hacker's Delight Section 7-1
     // Note that the cast (T) is always done after `>>` in case T is signed.
-    // This gives the effect of Java's `>>>` operator.
-    x = (((T)x & (T)rep_5555) << 1) | ((T)(x >> 1) & (T)rep_5555);
-    x = (((T)x & (T)rep_3333) << 2) | ((T)(x >> 2) & (T)rep_3333);
-    x = (((T)x & (T)rep_0F0F) << 4) | ((T)(x >> 4) & (T)rep_0F0F);
+    // Since x is always unsigned, we get the effect of Java's `>>>` operator.
+    x = (((T)x & rep_5555) << 1) | ((T)(x >> 1) & rep_5555);
+    x = (((T)x & rep_3333) << 2) | ((T)(x >> 2) & rep_3333);
+    x = (((T)x & rep_0F0F) << 4) | ((T)(x >> 4) & rep_0F0F);
+    // The vigourous re-casting to T here means that all of the
+    // logical operations can be strength reduced to the width of T.
+    // For example, on x86, when T is 64 bits, 64-bit instructions
+    // (like andq, shrq) are selected for all this logic, but for
+    // smaller T, narrow instructions (like andl, shrl) are selected.
     return (T)x;
   }
 
-  static constexpr T reverse_bytes_template(uint64_t x) {
-    // GCC and compatible (including Clang)
-    #if defined(TARGET_COMPILER_gcc)
-    switch (S) {
-    case 2: return (T) __builtin_bswap16((T) x);
-    case 4: return (T) __builtin_bswap32((T) x);
-    case 8: return (T) __builtin_bswap64((T) x);
-    default:  break;  // fall through to generic code
-    }
-    #endif
+  // At this point one might consider calling intrinsics like
+  // __builtin_bswap{16,32,64}, but in fact this generic code is
+  // routinely recognized by the compiler as a byte-swap operation and
+  // the single instruction is selected anyway.
+  static constexpr T reverse_bytes(uint64_t x) {
     // Based on Hacker's Delight Section 7-1
     // Note that the cast (T) is always done after `>>` in case T is signed.
-    // This gives the effect of Java's `>>>` operator.
-    if (S <= 1)  return (T)x;
-    x = (((T)x & (T)rep_00FF) << 8)  | ((T)(x >> 8)  & (T)rep_00FF);
-    if (S <= 2)  return (T)x;
-    x = (((T)x & (T)rep_FFFF) << 16) | ((T)(x >> 16) & (T)rep_FFFF);
-    if (S <= 4)  return (T)x;
-    x = ((T)x << 32) | (T)(x >> 32);
+    // Since x is always unsigned, we get the effect of Java's `>>>` operator.
+    if (NB <= 8)  return (T)x;
+    x = (((T)x & rep_00FF) << 8)  | ((T)(x >> 8)  & rep_00FF);
+    if (NB <= 16)  return (T)x;
+    x = (((T)x & rep_FFFF) << 16) | ((T)(x >> 16) & rep_FFFF);
+    if (NB <= 32)  return (T)x;
+    // Using NB/2 instead of 32 avoids a warning in dead code when T=int32_t.
+    // The code is never reached, but it is also warn-worthy since shifting
+    // a 32-bit value by 32 is an undefined operation.  NB/2 always works.
+    // We don't need similar hack above (NB/4, etc.) because auto-promotion
+    // to 32 bits means that shifts below 32 bits are always acceptable.
+    // What a wonderful world.
+    x = ((T)x << (NB/2)) | (T)(x >> (NB/2));
     return (T)x;
-  }
-
-  static constexpr T reverse_bits_template(uint64_t x) {
-    return reverse_bytes_template(reverse_bits_in_bytes_template(x));
   }
 };
 
 // Performs byte reversal of an integral type up to 64 bits.
 template <typename T, ENABLE_IF(std::is_integral<T>::value)>
-inline constexpr T reverse_bytes(T x) {
-  return ReverseImpl<T, sizeof(T)>::reverse_bytes_template(x);
+constexpr T reverse_bytes(T x) {
+  return ReverseBitsImpl<T>::reverse_bytes(x);
 }
 
 // Performs bytewise bit reversal of each byte of an integral
 // type up to 64 bits.
 template <typename T, ENABLE_IF(std::is_integral<T>::value)>
-inline constexpr T reverse_bits_in_bytes(T x) {
-  return ReverseImpl<T, sizeof(T)>::reverse_bits_in_bytes_template(x);
+constexpr T reverse_bits_in_bytes(T x) {
+  return ReverseBitsImpl<T>::reverse_bits_in_bytes(x);
 }
 
 // Performs full bit reversal an integral type up to 64 bits.
 template <typename T, ENABLE_IF(std::is_integral<T>::value)>
-inline constexpr T reverse_bits(T x) {
-  return ReverseImpl<T, sizeof(T)>::reverse_bits_template(x);
+constexpr T reverse_bits(T x) {
+  return reverse_bytes(reverse_bits_in_bytes(x));
 }
 
 #endif // SHARE_UTILITIES_MOVE_BITS_HPP

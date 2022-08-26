@@ -74,28 +74,27 @@ TEST_VM(moveBits, reversals) {
   test_reversals<uint8_t>();
 }
 
-// here is some object code to look at:
+// Here is some object code to look at if we want to do a manual
+// study.  One could find the build file named test_moveBits.o.cmdline
+// and hand-edit the command line to produce assembly code in
+// test_moveBits.s.
 
-int32_t code_quality_reverse_bits_32(int32_t x) {
-  return reverse_bits(x);
+int16_t code_quality_reverse_bytes_16(int16_t x) {
+  return reverse_bytes(x);  // should compile to bswap/xchg/rolw 8
 }
-
 int32_t code_quality_reverse_bytes_32(int32_t x) {
-  return reverse_bytes(x);
+  return reverse_bytes(x);  // should compile to bswapl
 }
-
-int32_t code_quality_reverse_bits_in_bytes_32(int32_t x) {
-  return reverse_bits_in_bytes(x);
-}
-
-int64_t code_quality_reverse_bits_64(int64_t x) {
-  return reverse_bits(x);
-}
-
 int64_t code_quality_reverse_bytes_64(int64_t x) {
-  return reverse_bytes(x);
+  return reverse_bytes(x);  // should compile to bswapq
 }
 
-int64_t code_quality_reverse_bits_in_bytes_64(int64_t x) {
-  return reverse_bits_in_bytes(x);
+int16_t code_quality_reverse_bits_16(int16_t x) {
+  return reverse_bits(x);  // should compile to andl/shrl with 16-bit masks
+}
+int32_t code_quality_reverse_bits_32(int32_t x) {
+  return reverse_bits(x);  // should compile to andl/shrl with 32-bit masks
+}
+int64_t code_quality_reverse_bits_64(int64_t x) {
+  return reverse_bits(x);  // should compile to andq/shrq with 64-bit masks
 }
