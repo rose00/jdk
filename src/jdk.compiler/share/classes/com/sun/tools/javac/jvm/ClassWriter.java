@@ -964,6 +964,13 @@ public class ClassWriter extends ClassFile {
             endAttr(alenIdx);
             acount++;
         }
+        if (v.getAutonomousValue() != null) {
+            Assert.check(v.getConstValue() == null);  //VM does not allow both
+            int alenIdx = writeAttr(names.AutonomousValue);
+            databuf.appendChar(poolWriter.putConstant(v.getAutonomousValue()));
+            endAttr(alenIdx);
+            acount++;
+        }
         acount += writeMemberAttrs(v, false);
         acount += writeExtraAttributes(v);
         endAttrs(acountIdx, acount);

@@ -231,6 +231,7 @@ public class Symtab {
     public final Type ioExceptionType;
     public final Type objectStreamExceptionType;
     public final Type externalizableType;
+    public final Type autoStaticManager;
 
     /** The symbol representing the length field of an array.
      */
@@ -605,6 +606,7 @@ public class Symtab {
         ioExceptionType = enterClass("java.io.IOException");
         objectStreamExceptionType = enterClass("java.io.ObjectStreamException");
         externalizableType = enterClass("java.io.Externalizable");
+        autoStaticManager = enterClass("java.lang.runtime.AutoStaticManager");
 
         synthesizeEmptyInterfaceIfMissing(autoCloseableType);
         synthesizeEmptyInterfaceIfMissing(cloneableType);

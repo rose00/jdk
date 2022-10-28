@@ -1771,8 +1771,27 @@ public abstract class Symbol extends AnnoConstruct implements PoolConstant, Elem
                 } catch (Exception ex) {
                     throw new AssertionError(ex);
                 }
+            } else if (data instanceof DynamicVarSymbol) {
+                return null; // ignore
             }
             return data;
+        }
+
+        public boolean isAutonomousField() {
+            return (flags() & AUTONOMOUS_FIELD) != 0;
+        }
+
+        // this is set in Gen, after BSM resources are spun up
+        public void setAutonomousValue(DynamicVarSymbol dsym) {
+            Assert.check(data == null);
+            data = dsym;
+        }
+        public DynamicVarSymbol getAutonomousValue() {
+            if (data instanceof DynamicVarSymbol dsym) {
+                return dsym;
+            } else {
+                return null;
+            }
         }
 
         public void setData(Object data) {

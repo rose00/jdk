@@ -1190,9 +1190,9 @@ public class Check {
             else if (sym.owner.kind != TYP)
                 mask = LocalVarFlags;
             else if ((sym.owner.flags_field & INTERFACE) != 0)
-                mask = implicit = InterfaceVarFlags;
+                mask = (implicit = InterfaceVarFlags) | AUTONOMOUS_FIELD;
             else
-                mask = VarFlags;
+                mask = VarFlags | AUTONOMOUS_FIELD;
             break;
         case MTH:
             if (sym.name == names.init) {

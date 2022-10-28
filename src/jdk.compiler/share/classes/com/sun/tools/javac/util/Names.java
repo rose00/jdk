@@ -77,6 +77,7 @@ public class Names {
     public final Name addSuppressed;
     public final Name any;
     public final Name append;
+    public final Name autoinit;
     public final Name clinit;
     public final Name clone;
     public final Name close;
@@ -138,6 +139,7 @@ public class Names {
     public final Name Enum;
     public final Name Exceptions;
     public final Name InnerClasses;
+    public final Name AutonomousValue;
     public final Name LineNumberTable;
     public final Name LocalVariableTable;
     public final Name LocalVariableTypeTable;
@@ -220,6 +222,11 @@ public class Names {
     public final Name typeSwitch;
     public final Name enumSwitch;
 
+    // autonomous fields
+    public final Name auto;
+    public final Name make;
+    public final Name initialize;
+
     public final Name.Table table;
 
     public Names(Context context) {
@@ -256,6 +263,7 @@ public class Names {
         addSuppressed = fromString("addSuppressed");
         any = fromString("<any>");
         append = fromString("append");
+        autoinit = fromString("$autoinit$");  // for autonomous initializers
         clinit = fromString("<clinit>");
         clone = fromString("clone");
         close = fromString("close");
@@ -318,6 +326,7 @@ public class Names {
         Enum = fromString("Enum");
         Exceptions = fromString("Exceptions");
         InnerClasses = fromString("InnerClasses");
+        AutonomousValue = fromString("AutonomousValue");
         LineNumberTable = fromString("LineNumberTable");
         LocalVariableTable = fromString("LocalVariableTable");
         LocalVariableTypeTable = fromString("LocalVariableTypeTable");
@@ -394,6 +403,11 @@ public class Names {
         // pattern switches
         typeSwitch = fromString("typeSwitch");
         enumSwitch = fromString("enumSwitch");
+
+        // autonomous fields
+        auto = fromString("__Auto");  //__MAKE IT CLEAR THIS IS A DRAFT__
+        make = fromString("make");
+        initialize = fromString("initialize");
     }
 
     protected Name.Table createTable(Options options) {

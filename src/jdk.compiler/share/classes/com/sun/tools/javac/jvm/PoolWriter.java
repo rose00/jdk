@@ -246,6 +246,10 @@ public class PoolWriter {
         if (index == null) {
             index = bootstrapMethods.size();
             bootstrapMethods.put(bsmKey, index);
+            // be sure the BSM and args are in the pool as well:
+            putConstant(dynamic.bootstrapMethod());
+            for (var arg : dynamic.staticArgs())
+                putConstant(arg);
         }
 
         return index;

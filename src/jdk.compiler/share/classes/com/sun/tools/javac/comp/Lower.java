@@ -99,6 +99,7 @@ public class Lower extends TreeTranslator {
     private final boolean disableProtectedAccessors; // experimental
     private final PkgInfo pkginfoOpt;
     private final boolean optimizeOuterThis;
+    private final boolean desugarAutonomousFields;
 
     protected Lower(Context context) {
         context.put(lowerKey, this);
@@ -124,6 +125,7 @@ public class Lower extends TreeTranslator {
             target.optimizeOuterThis() ||
             options.getBoolean("optimizeOuterThis", false);
         disableProtectedAccessors = options.isSet("disableProtectedAccessors");
+        desugarAutonomousFields = options.isSet("desugarAutonomousFields");
     }
 
     /** The currently enclosing class.
@@ -1026,6 +1028,34 @@ public class Lower extends TreeTranslator {
         return accessor;
     }
 
+    MethodSymbol autonomousFieldAccessSymbol(Symbol sym) {
+        // lookup symbol and create one if it doesn't exist
+        Symbol getter = sym.owner.members().findFirst(autonomousFieldGetName(sym));
+        if (getter == null) {
+            getter =  new MethodSymbol(
+                    STATIC | SYNTHETIC | (sym.flags() & AccessFlags),
+                    autonomousFieldGetName(sym),
+                    new MethodType(List.nil(), sym.type, List.nil(), syms.methodClass),
+                    sym.owner);
+            sym.owner.members().enter(getter);
+        }
+        return (MethodSymbol)getter;
+    }
+
+    JCMethodDecl autonomousFieldAccessDef(Symbol sym) {
+        MethodSymbol getter = autonomousFieldAccessSymbol(sym);
+        Assert.checkNonNull(getter);
+        // create synthetic getter tree
+        JCMethodDecl initDef = make.MethodDef(getter, make.Block(0, List.of(make.Return(make.Ident(sym)))));
+        JCClassDecl currentDecl = classDef(currentClass);
+        currentDecl.defs = currentDecl.defs.prepend(initDef);
+        return initDef;
+    }
+
+    Name autonomousFieldGetName(Symbol sym) {
+        return sym.name.append('$', names.fromString("get"));
+    }
+
     /** The qualifier to be used for accessing a symbol in an outer class.
      *  This is either C.sym or C.this.sym, depending on whether or not
      *  sym is static.
@@ -1157,6 +1187,16 @@ public class Lower extends TreeTranslator {
             break;
         case MTH: case VAR:
             if (sym.owner.kind == TYP) {
+                boolean isAutonomousField = (sym.kind == VAR) &&
+                                            (sym.flags() & AUTONOMOUS_FIELD) != 0;
+                if (isAutonomousField && desugarAutonomousFields &&
+                        sym.owner != currentClass) {
+                    Symbol access = autonomousFieldAccessSymbol(sym);
+                    JCExpression receiver = make.Select(
+                            base != null ? base : make.QualIdent(access.owner),
+                            access);
+                    return make.App(receiver, List.nil());
+                }
 
                 // Access methods are required for
                 //  - private members,
@@ -2618,6 +2658,7 @@ public class Lower extends TreeTranslator {
             Name bootstrapName,
             Name argName,
             boolean isStatic) {
+        // FIXME: call lookupMethod here:
         MethodSymbol bsm = rs.resolveInternalMethod(tree.pos(), attrEnv, site,
                 bootstrapName, staticArgTypes, List.nil());
 
@@ -3566,6 +3607,10 @@ public class Lower extends TreeTranslator {
                 new MethodSymbol((tree.mods.flags&STATIC) | BLOCK,
                                  names.empty, null,
                                  currentClass);
+            // a autonomous field might use a named access method
+            if (desugarAutonomousFields && (tree.sym.flags() & AUTONOMOUS_FIELD) != 0) {
+                autonomousFieldAccessDef(tree.sym);
+            }
         }
         if (tree.init != null) tree.init = translate(tree.init, tree.type);
         result = tree;

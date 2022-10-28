@@ -482,6 +482,12 @@ public class ClassWriter {
         }
 
         @Override
+        public Void visitAutonomousValue(AutonomousValue_attribute attr, ClassOutputStream out) {
+            out.writeShort(attr.autonomousvalue_index);
+            return null;
+        }
+
+        @Override
         public Void visitLineNumberTable(LineNumberTable_attribute attr, ClassOutputStream out) {
             out.writeShort(attr.line_number_table.length);
             for (LineNumberTable_attribute.Entry e: attr.line_number_table)
