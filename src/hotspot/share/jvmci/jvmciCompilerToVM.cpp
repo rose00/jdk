@@ -1753,6 +1753,10 @@ C2V_VMENTRY(void, ensureInitialized, (JNIEnv* env, jobject, ARGUMENT_PAIR(klass)
   }
   if (klass->should_be_initialized()) {
     InstanceKlass* k = InstanceKlass::cast(klass);
+    if (RecordTraining) {
+      k->record_initialization_touch("ensure", nullptr, nullptr, nullptr,
+                                     "jvmci", CHECK);
+    }
     k->initialize(CHECK);
   }
 C2V_END

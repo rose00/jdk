@@ -4562,7 +4562,7 @@ void Compile::dump_print_inlining() {
 
 void Compile::log_late_inline(CallGenerator* cg) {
   if (log() != NULL) {
-    log()->head("late_inline method='%d'  inline_id='" JLONG_FORMAT "'", log()->identify(cg->method()),
+    log()->head("late_inline method='%d' inline_id='" JLONG_FORMAT "'", log()->identify(cg->method()),
                 cg->unique_id());
     JVMState* p = cg->call_node()->jvms();
     while (p != NULL) {

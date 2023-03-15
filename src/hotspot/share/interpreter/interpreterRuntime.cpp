@@ -224,6 +224,11 @@ JRT_ENTRY(void, InterpreterRuntime::_new(JavaThread* current, ConstantPool* pool
   klass->check_valid_for_instantiation(true, CHECK);
 
   // Make sure klass is initialized
+  if (RecordTraining) {
+    InstanceKlass* caller_klass = pool->pool_holder();
+    klass->record_initialization_touch("new", nullptr, nullptr,
+                                       caller_klass, nullptr, CHECK);
+  }
   klass->initialize(CHECK);
 
   // At this point the class may not be fully initialized

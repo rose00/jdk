@@ -1705,6 +1705,12 @@ bool Method::load_signature_classes(const methodHandle& m, TRAPS) {
       Klass* klass = ss.as_klass(SignatureStream::ReturnNull, THREAD);
       // We are loading classes eagerly. If a ClassNotFoundException or
       // a LinkageError was generated, be sure to ignore it.
+      if (log_is_enabled(Debug, class, resolve)) {
+        const char* from = m->method_holder()->external_name();
+        const char* to   = ss.as_symbol()->as_klass_external_name();
+        log_debug(class, resolve)("%s %s (load_signature_classes%s)", from, to,
+                                  HAS_PENDING_EXCEPTION ? ":failed" : "");
+      }
       if (HAS_PENDING_EXCEPTION) {
         if (PENDING_EXCEPTION->is_a(vmClasses::ClassNotFoundException_klass()) ||
             PENDING_EXCEPTION->is_a(vmClasses::LinkageError_klass())) {

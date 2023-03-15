@@ -145,6 +145,10 @@ JRT_BLOCK_ENTRY(void, JVMCIRuntime::new_instance_common(JavaThread* current, Kla
       }
     } else {
       // make sure klass is initialized
+      if (RecordTraining) {
+        h->record_initialization_touch("new", nullptr, nullptr, nullptr,
+                                       "jvmci", CHECK);
+      }
       h->initialize(CHECK);
     }
     // allocate instance and return via TLS
@@ -228,6 +232,10 @@ JRT_ENTRY(void, JVMCIRuntime::dynamic_new_instance_common(JavaThread* current, o
     }
   } else {
     // Make sure klass gets initialized
+    if (RecordTraining) {
+      klass->record_initialization_touch("new", nullptr, nullptr, nullptr,
+                                         "jvmci", CHECK);
+    }
     klass->initialize(CHECK);
   }
 

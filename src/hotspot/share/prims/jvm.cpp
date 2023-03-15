@@ -953,6 +953,27 @@ static jclass jvm_lookup_define_class(jclass lookup, const char *name,
                              is_strong ? "strong" : "weak",
                              vm_annotations ? "with vm annotations" : "without vm annotation");
 
+  if (RecordTraining) {
+    ttyLocker ttyl;
+    xtty->begin_head("lookup_define_class name='%s'", name);
+    xtty->klass(lookup_k, "lookup_");
+    xtty->print(" init='%d' hidden='%d' strong='%d' vmanno='%d' nestmate='%d'",
+                init, is_hidden, is_strong, vm_annotations, is_nestmate);
+    if (is_nestmate) {
+      xtty->klass(host_class, "host_");
+    }
+    xtty->stamp();
+    xtty->end_head();
+    // dump the class file bytes
+    // FIXME: There are better ways to report this information.
+    // Should be unified with post-transformation bytes as well.
+    // Also should be unified with "provenance" information about
+    // the usual case, which is when the classfile bytes are taken
+    // from the classpath or jimage.
+    const bool with_ascii = true, rel_addr = true;
+    xtty->log_only()->print_data(buf, len, with_ascii, rel_addr);
+    xtty->tail("lookup_define_class");
+  }
   if (!is_hidden) {
     // classData is only applicable for hidden classes
     if (classData != nullptr) {
@@ -1025,11 +1046,22 @@ static jclass jvm_lookup_define_class(jclass lookup, const char *name,
          "lookup class and defined class are in different packages");
 
   if (init) {
+    if (RecordTraining) {
+      ik->record_initialization_touch("lookup_define_class", nullptr, nullptr,
+                                      nullptr, nullptr, CHECK_NULL);
+    }
     ik->initialize(CHECK_NULL);
   } else {
     ik->link_class(CHECK_NULL);
   }
-
+  if (RecordTraining) {
+    ttyLocker ttyl;
+    xtty->begin_elem("lookup_define_class_done name='%s'", name);
+    xtty->klass(lookup_k, "lookup_");
+    xtty->klass(ik);
+    xtty->stamp();
+    xtty->end_elem();
+  }
   return (jclass) JNIHandles::make_local(THREAD, ik->java_mirror());
 }
 

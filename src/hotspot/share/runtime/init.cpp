@@ -47,6 +47,7 @@
 #include "sanitizers/leak.hpp"
 #include "services/memTracker.hpp"
 #include "utilities/macros.hpp"
+#include "utilities/xmlstream.hpp"
 #if INCLUDE_JVMCI
 #include "jvmci/jvmci.hpp"
 #endif
@@ -176,6 +177,8 @@ jint init_globals() {
   // have been set so dump the flags now.
   if (PrintFlagsFinal || PrintFlagsRanges) {
     JVMFlag::printFlags(tty, false, PrintFlagsRanges);
+  } else if (RecordTraining) {
+    JVMFlag::printFlags(xtty->log_only(), false, PrintFlagsRanges);
   }
 
   return JNI_OK;

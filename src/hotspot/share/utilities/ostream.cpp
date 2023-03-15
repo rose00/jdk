@@ -136,7 +136,9 @@ void outputStream::do_vsnprintf_and_write_with_scratch_buffer(const char* format
 }
 
 void outputStream::do_vsnprintf_and_write(const char* format, va_list ap, bool add_cr) {
-  if (_scratch) {
+  if (!strchr(format, '%')) {
+    write(format, strlen(format));
+  } else if (_scratch) {
     do_vsnprintf_and_write_with_scratch_buffer(format, ap, add_cr);
   } else {
     do_vsnprintf_and_write_with_automatic_buffer(format, ap, add_cr);
@@ -279,7 +281,7 @@ void outputStream::print_julong(julong value) {
  *
  * indent is applied to each line.  Ends with a CR.
  */
-void outputStream::print_data(void* data, size_t len, bool with_ascii, bool rel_addr) {
+void outputStream::print_data(const void* data, size_t len, bool with_ascii, bool rel_addr) {
   size_t limit = (len + 16) / 16 * 16;
   for (size_t i = 0; i < limit; ++i) {
     if (i % 16 == 0) {
@@ -674,6 +676,10 @@ fileStream* defaultStream::open_file(const char* log_name) {
     return file;
   }
 
+  if (RecordTraining) {
+    vm_exit_during_initialization("cannot create log file for RecordTraining mode: %s", try_name);
+  }
+
   // Try again to open the file in the temp directory.
   delete file;
   // Note: This feature is for maintainer use only.  No need for L10N.
@@ -714,11 +720,12 @@ void defaultStream::init_log() {
 }
 
 void defaultStream::start_log() {
-  xmlStream*xs = _outer_xmlStream;
+  xmlStream* xs = _outer_xmlStream;
     if (this == tty)  xtty = xs;
     // Write XML header.
     xs->print_cr("<?xml version='1.0' encoding='UTF-8'?>");
-    // (For now, don't bother to issue a DTD for this private format.)
+    // Do not bother to issue a DTD for this private format.
+    // See comments at top of xmlstream.cpp for design notes.
 
     // Calculate the start time of the log as ms since the epoch: this is
     // the current time in ms minus the uptime in ms.
@@ -729,38 +736,41 @@ void defaultStream::start_log() {
              os::current_process_id(), (int64_t)time_ms);
     // Write VM version header immediately.
     xs->head("vm_version");
-    xs->head("name"); xs->text("%s", VM_Version::vm_name()); xs->cr();
+    xs->head("name");  // FIXME: should be an elem attr, not head/tail pair
+    xs->log_only()->print_cr("%s", VM_Version::vm_name());
     xs->tail("name");
-    xs->head("release"); xs->text("%s", VM_Version::vm_release()); xs->cr();
+    xs->head("release");
+    xs->log_only()->print_cr("%s", VM_Version::vm_release());
     xs->tail("release");
-    xs->head("info"); xs->text("%s", VM_Version::internal_vm_info_string()); xs->cr();
+    xs->head("info");
+    xs->log_only()->print_cr("%s", VM_Version::internal_vm_info_string());
     xs->tail("info");
     xs->tail("vm_version");
     // Record information about the command-line invocation.
     xs->head("vm_arguments");  // Cf. Arguments::print_on()
     if (Arguments::num_jvm_flags() > 0) {
       xs->head("flags");
-      Arguments::print_jvm_flags_on(xs->text());
+      Arguments::print_jvm_flags_on(xs->log_only());
       xs->tail("flags");
     }
     if (Arguments::num_jvm_args() > 0) {
       xs->head("args");
-      Arguments::print_jvm_args_on(xs->text());
+      Arguments::print_jvm_args_on(xs->log_only());
       xs->tail("args");
     }
     if (Arguments::java_command() != nullptr) {
-      xs->head("command"); xs->text()->print_cr("%s", Arguments::java_command());
+      xs->head("command"); xs->log_only()->print_cr("%s", Arguments::java_command());
       xs->tail("command");
     }
     if (Arguments::sun_java_launcher() != nullptr) {
-      xs->head("launcher"); xs->text()->print_cr("%s", Arguments::sun_java_launcher());
+      xs->head("launcher"); xs->log_only()->print_cr("%s", Arguments::sun_java_launcher());
       xs->tail("launcher");
     }
     if (Arguments::system_properties() !=  nullptr) {
       xs->head("properties");
       // Print it as a java-style property list.
       // System properties don't generally contain newlines, so don't bother with unparsing.
-      outputStream *text = xs->text();
+      outputStream *text = xs->log_only();
       for (SystemProperty* p = Arguments::system_properties(); p != nullptr; p = p->next()) {
         assert(p->key() != nullptr, "p->key() is nullptr");
         if (p->readable()) {
@@ -779,6 +789,7 @@ void defaultStream::start_log() {
     xs->head("tty");
     // All further non-markup text gets copied to the tty:
     xs->_text = this;  // requires friend declaration!
+    // (And xtty->log_only() remains as a back door to the non-tty log file.)
 }
 
 // finish_log() is called during normal VM shutdown. finish_log_on_error() is

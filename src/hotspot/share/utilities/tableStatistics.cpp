@@ -28,6 +28,7 @@
 #include "utilities/debug.hpp"
 #include "utilities/macros.hpp"
 #include "utilities/tableStatistics.hpp"
+#include "utilities/xmlstream.hpp"
 #if INCLUDE_JFR
 #include "jfr/jfr.hpp"
 #endif
@@ -132,6 +133,8 @@ TableStatistics::TableStatistics(TableRateStatistics& rate_stats,
 TableStatistics::~TableStatistics() { }
 
 void TableStatistics::print(outputStream* st, const char *table_name) {
+  if (st == tty && xtty != nullptr)
+    xtty->head("statistics type='table:%s'", table_name);
   st->print_cr("%s statistics:", table_name);
   st->print_cr("Number of buckets       : %9" PRIuPTR " = %9" PRIuPTR
                " bytes, each " SIZE_FORMAT,
@@ -150,5 +153,7 @@ void TableStatistics::print(outputStream* st, const char *table_name) {
   st->print_cr("Variance of bucket size : %9.3f", _variance_of_bucket_size);
   st->print_cr("Std. dev. of bucket size: %9.3f", _stddev_of_bucket_size);
   st->print_cr("Maximum bucket size     : %9" PRIuPTR, _maximum_bucket_size);
+  if (st == tty && xtty != nullptr)
+    xtty->tail("statistics");
 }
 

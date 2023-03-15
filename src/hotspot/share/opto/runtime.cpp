@@ -74,7 +74,7 @@
 #include "runtime/synchronizer.hpp"
 #include "runtime/threadCritical.hpp"
 #include "runtime/threadWXSetters.inline.hpp"
-#include "runtime/vframe.hpp"
+#include "runtime/vframe.inline.hpp"
 #include "runtime/vframeArray.hpp"
 #include "runtime/vframe_hp.hpp"
 #include "utilities/copy.hpp"
@@ -213,7 +213,21 @@ JRT_BLOCK_ENTRY(void, OptoRuntime::new_instance_C(Klass* klass, JavaThread* curr
     Handle holder(current, klass->klass_holder()); // keep the klass alive
     klass->check_valid_for_instantiation(false, THREAD);
     if (!HAS_PENDING_EXCEPTION) {
-      InstanceKlass::cast(klass)->initialize(THREAD);
+      InstanceKlass* ik = InstanceKlass::cast(klass);
+      if (RecordTraining) {
+        ResourceMark rm(current);
+        // last java frame on stack
+        vframeStream vfst(current, true);
+        assert(!vfst.at_end(), "Java frame must exist");
+        methodHandle caller_method(current, vfst.method());
+        InstanceKlass* caller_klass = caller_method->method_holder();
+        ik->record_initialization_touch("new", nullptr, nullptr,
+                                        caller_klass, "c2", THREAD);
+        if (HAS_PENDING_EXCEPTION) {
+          CLEAR_PENDING_EXCEPTION;  // could not allocate training data
+        }
+      }
+      ik->initialize(THREAD);
     }
   }
 

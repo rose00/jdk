@@ -4066,6 +4066,24 @@ jint Arguments::apply_ergo() {
   }
 #endif // PRODUCT
 
+  // FIXME:  Stop piggy-backing training output on generic VM log.
+  // The JVM will never, ever read back one of its own logs.
+  // There needs to be a Leyden-style condensation of the information
+  // in the log.
+  if (RecordTraining) {
+    LogVMOutput = true;
+    if (FLAG_IS_DEFAULT(LogCompilation)) {
+      LogCompilation = true;
+    }
+    if (!FLAG_IS_DEFAULT(TrainingFile) || FLAG_IS_DEFAULT(LogFile)) {
+      LogFile = TrainingFile != nullptr ? TrainingFile : "hs_training_%p.log";
+    }
+    // 
+    if (FLAG_IS_DEFAULT(hashCode)) {
+      hashCode = 3;  // simple sequence numbers: the most repeatable
+    }
+  }
+
   if (PrintCommandLineFlags) {
     JVMFlag::printSetFlags(tty);
   }

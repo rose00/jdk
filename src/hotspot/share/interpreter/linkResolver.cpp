@@ -49,6 +49,7 @@
 #include "oops/objArrayOop.hpp"
 #include "oops/oop.inline.hpp"
 #include "oops/symbolHandle.hpp"
+#include "oops/trainingData.hpp"
 #include "prims/methodHandles.hpp"
 #include "runtime/fieldDescriptor.inline.hpp"
 #include "runtime/frame.inline.hpp"
@@ -1041,6 +1042,20 @@ void LinkResolver::resolve_field(fieldDescriptor& fd,
     // note 2: we don't want to force initialization if we are just checking
     //         if the field access is legal; e.g., during compilation
     if (is_static && initialize_class) {
+      if (RecordTraining && sel_klass->is_instance_klass()) {
+        InstanceKlass* sk = InstanceKlass::cast(sel_klass);
+        if (sel_klass != current_klass) {
+          // one class reaching into another, triggering initialization
+          const char* reason = is_put ? "putstatic" : "getstatic";
+          sk->record_initialization_touch(reason, field, nullptr,
+                                          current_klass, nullptr, CHECK);
+        } else if (is_put && sk->is_being_initialized() &&
+                   sk->is_init_thread(THREAD)) {
+          // 99% of all field sets in <clinit> come here
+          sk->alloc_training_data(CHECK);
+          sk->training_data()->record_static_field_init(&fd, "putstatic");
+        }
+      }
       sel_klass->initialize(CHECK);
     }
   }
@@ -1071,9 +1086,16 @@ void LinkResolver::resolve_static_call(CallInfo& result,
   Method* resolved_method = linktime_resolve_static_method(link_info, CHECK);
 
   // The resolved class can change as a result of this resolution.
-  Klass* resolved_klass = resolved_method->method_holder();
+  InstanceKlass* resolved_klass = resolved_method->method_holder();
 
   // Initialize klass (this should only happen if everything is ok)
+  if (RecordTraining && resolved_klass != link_info.current_klass()) {
+    resolved_klass->record_initialization_touch("invokestatic",
+                                                resolved_method->name(),
+                                                resolved_method->signature(),
+                                                link_info.current_klass(),
+                                                nullptr, CHECK);
+  }
   if (initialize_class && resolved_klass->should_be_initialized()) {
     resolved_klass->initialize(CHECK);
     // Use updated LinkInfo to reresolve with resolved method holder

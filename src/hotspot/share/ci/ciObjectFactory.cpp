@@ -49,6 +49,7 @@
 #include "memory/allocation.inline.hpp"
 #include "memory/universe.hpp"
 #include "oops/oop.inline.hpp"
+#include "oops/trainingData.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/signature.hpp"
 #include "utilities/macros.hpp"
@@ -250,6 +251,13 @@ ciObject* ciObjectFactory::get(oop key) {
 
   // Not a perm-space object.
   insert_non_perm(bucket, keyHandle(), new_object);
+  if (RecordTraining) {
+    ciEnv* env = ciEnv::current();
+    if (env->task() != nullptr && env->log() != nullptr) {
+      // Note: log will be null during init_compiler_runtime.
+      TrainingData::record_jit_observation(env, new_object);
+    }
+  }
   return new_object;
 }
 
@@ -332,6 +340,13 @@ ciMetadata* ciObjectFactory::get_metadata(Metadata* key) {
     }
     assert(!found, "no double insert");
     _ci_metadata.insert_before(index, new_object);
+    if (RecordTraining) {
+      ciEnv* env = ciEnv::current();
+      if (env->task() != nullptr && env->log() != nullptr) {
+        // Note: log will be null during init_compiler_runtime.
+        TrainingData::record_jit_observation(env, new_object);
+      }
+    }
     return new_object;
   }
   return _ci_metadata.at(index)->as_metadata();

@@ -99,7 +99,7 @@ class outputStream : public CHeapObjBase {
    void print_raw(const char* str, size_t len)   { write(str,         len); }
    void print_raw_cr(const char* str)         { write(str, strlen(str)); cr(); }
    void print_raw_cr(const char* str, size_t len){ write(str,         len); cr(); }
-   void print_data(void* data, size_t len, bool with_ascii, bool rel_addr=true);
+   void print_data(const void* data, size_t len, bool with_ascii, bool rel_addr = true);
    void put(char ch);
    void sp(int count = 1);
    void cr();

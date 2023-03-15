@@ -360,6 +360,16 @@ JRT_ENTRY(void, Runtime1::new_instance(JavaThread* current, Klass* klass))
   InstanceKlass* h = InstanceKlass::cast(klass);
   h->check_valid_for_instantiation(true, CHECK);
   // make sure klass is initialized
+  if (RecordTraining) {
+    ResourceMark rm(current);
+    // last java frame on stack
+    vframeStream vfst(current, true);
+    assert(!vfst.at_end(), "Java frame must exist");
+    methodHandle caller_method(current, vfst.method());
+    InstanceKlass* caller_klass = caller_method->method_holder();
+    h->record_initialization_touch("new", nullptr, nullptr, caller_klass,
+                                   "c1", CHECK);
+  }
   h->initialize(CHECK);
   // allocate instance and return via TLS
   oop obj = h->allocate_instance(CHECK);

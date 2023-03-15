@@ -44,6 +44,7 @@ class ciInstanceKlass : public ciKlass {
   friend class ciMethod;
   friend class ciField;
   friend class ciReplay;
+  friend class TrainingData;
 
 private:
   enum SubklassValue { subklass_unknown, subklass_false, subklass_true };
