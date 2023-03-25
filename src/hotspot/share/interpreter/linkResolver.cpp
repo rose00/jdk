@@ -1084,6 +1084,9 @@ void LinkResolver::resolve_static_call(CallInfo& result,
                                        const LinkInfo& link_info,
                                        bool initialize_class, TRAPS) {
   Method* resolved_method = linktime_resolve_static_method(link_info, CHECK);
+  if (RecordTraining) {
+    TrainingData::note_method_resolution(link_info, resolved_method, CHECK);
+  }
 
   // The resolved class can change as a result of this resolution.
   InstanceKlass* resolved_klass = resolved_method->method_holder();
@@ -1148,6 +1151,9 @@ void LinkResolver::resolve_special_call(CallInfo& result,
                                         const LinkInfo& link_info,
                                         TRAPS) {
   Method* resolved_method = linktime_resolve_special_method(link_info, CHECK);
+  if (RecordTraining) {
+    TrainingData::note_method_resolution(link_info, resolved_method, CHECK);
+  }
   runtime_resolve_special_method(result, link_info, methodHandle(THREAD, resolved_method), recv, CHECK);
 }
 
@@ -1328,6 +1334,9 @@ void LinkResolver::resolve_virtual_call(CallInfo& result, Handle recv, Klass* re
                                         const LinkInfo& link_info,
                                         bool check_null_and_abstract, TRAPS) {
   Method* resolved_method = linktime_resolve_virtual_method(link_info, CHECK);
+  if (RecordTraining) {
+    TrainingData::note_method_resolution(link_info, resolved_method, CHECK);
+  }
   runtime_resolve_virtual_method(result, methodHandle(THREAD, resolved_method),
                                  link_info.resolved_klass(),
                                  recv, receiver_klass,
@@ -1450,6 +1459,9 @@ void LinkResolver::resolve_interface_call(CallInfo& result, Handle recv, Klass* 
                                           bool check_null_and_abstract, TRAPS) {
   // throws linktime exceptions
   Method* resolved_method = linktime_resolve_interface_method(link_info, CHECK);
+  if (RecordTraining) {
+    TrainingData::note_method_resolution(link_info, resolved_method, CHECK);
+  }
   methodHandle mh(THREAD, resolved_method);
   runtime_resolve_interface_method(result, mh, link_info.resolved_klass(),
                                    recv, recv_klass, check_null_and_abstract, CHECK);

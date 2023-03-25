@@ -918,7 +918,10 @@ void nmethod::log_identity(xmlStream* log) const {
   log->print(" code_compile_id='%d'", compile_id());
   const char* nm_kind = compile_kind();
   if (nm_kind != nullptr)  log->print(" code_compile_kind='%s'", nm_kind);
-  log->print(" code_compiler='%s'", compiler_name());
+  const char* cc_name = compiler_name();
+  if (cc_name != nullptr && *cc_name != '\0') {
+    log->print(" code_compiler='%s'", cc_name);
+  }
   if (TieredCompilation) {
     log->print(" code_compile_level='%d'", comp_level());
   }

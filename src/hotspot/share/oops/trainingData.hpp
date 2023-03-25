@@ -31,6 +31,7 @@
 class ciEnv;
 class ciBaseObject;
 class CompileTask;
+class LinkInfo;
 class xmlStream;
 
 class TrainingData: public CHeapObj<mtClass> {
@@ -144,6 +145,11 @@ public:
                                    Klass* requesting_klass,
                                    const char* context,
                                    TRAPS);
+
+  // Hook called when a class resolves a method.
+  static void note_method_resolution(const LinkInfo& link_info,
+                                     Method* resolved_method,
+                                     TRAPS);
 
   // The JIT looks at classes and objects too and can depend on their state.
   // These simple calls just report the *possibility* of an observation.

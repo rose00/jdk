@@ -650,6 +650,14 @@ void CompileBroker::compilation_init_phase1(JavaThread* THREAD) {
    }
 #endif // INCLUDE_JVMCI
 
+  if (xtty != nullptr) {
+    ttyLocker ttyl;
+    xtty->begin_elem("compiler_configured c1_count='%d' c2_count='%d'",
+                     _c1_count, _c2_count);
+    xtty->stamp();
+    xtty->end_elem();
+  }
+
   // Start the compiler thread(s)
   init_compiler_threads();
   // totalTime performance counter is always created as it is required
@@ -755,6 +763,12 @@ void CompileBroker::compilation_init_phase1(JavaThread* THREAD) {
 // Completes compiler initialization. Compilation requests submitted
 // prior to this will be silently ignored.
 void CompileBroker::compilation_init_phase2() {
+  if (xtty != nullptr) {
+    ttyLocker ttyl;
+    xtty->begin_elem("compiler_started");
+    xtty->stamp();
+    xtty->end_elem();
+  }
   _initialized = true;
 }
 
@@ -943,11 +957,17 @@ void CompileBroker::init_compiler_threads() {
       JavaThread *ct = make_thread(compiler_t, thread_handle, _c2_compile_queue, _compilers[1], THREAD);
       assert(ct != nullptr, "should have been handled for initial thread");
       _compilers[1]->set_num_compiler_threads(i + 1);
-      if (TraceCompilerThreads) {
+      if (TraceCompilerThreads || xtty != nullptr) {
         ResourceMark rm;
         ThreadsListHandle tlh;  // name() depends on the TLH.
         assert(tlh.includes(ct), "ct=" INTPTR_FORMAT " exited unexpectedly.", p2i(ct));
-        tty->print_cr("Added initial compiler thread %s", ct->name());
+        if (TraceCompilerThreads)
+          tty->print_cr("Added initial compiler thread %s", ct->name());
+        if (xtty != nullptr) {
+          ttyLocker ttyl;
+          xtty->elem("compiler_thread name='%s' compiler='%s' type='%d'",
+                     ct->name(), _compilers[1]->name(), _compilers[1]->type());
+        }
       }
     }
   }
@@ -964,11 +984,17 @@ void CompileBroker::init_compiler_threads() {
       JavaThread *ct = make_thread(compiler_t, thread_handle, _c1_compile_queue, _compilers[0], THREAD);
       assert(ct != nullptr, "should have been handled for initial thread");
       _compilers[0]->set_num_compiler_threads(i + 1);
-      if (TraceCompilerThreads) {
+      if (TraceCompilerThreads || xtty != nullptr) {
         ResourceMark rm;
         ThreadsListHandle tlh;  // name() depends on the TLH.
         assert(tlh.includes(ct), "ct=" INTPTR_FORMAT " exited unexpectedly.", p2i(ct));
-        tty->print_cr("Added initial compiler thread %s", ct->name());
+        if (TraceCompilerThreads)
+          tty->print_cr("Added initial compiler thread %s", ct->name());
+        if (xtty != nullptr) {
+          ttyLocker ttyl;
+          xtty->elem("compiler_thread name='%s' compiler='%s' type='%d'",
+                     ct->name(), _compilers[0]->name(), _compilers[0]->type());
+        }
       }
     }
   }
@@ -1044,12 +1070,23 @@ void CompileBroker::possibly_add_compiler_threads(JavaThread* THREAD) {
       JavaThread *ct = make_thread(compiler_t, compiler2_object(i), _c2_compile_queue, _compilers[1], THREAD);
       if (ct == nullptr) break;
       _compilers[1]->set_num_compiler_threads(i + 1);
-      if (TraceCompilerThreads) {
+      if (TraceCompilerThreads || xtty != nullptr) {
         ResourceMark rm;
         ThreadsListHandle tlh;  // name() depends on the TLH.
         assert(tlh.includes(ct), "ct=" INTPTR_FORMAT " exited unexpectedly.", p2i(ct));
-        tty->print_cr("Added compiler thread %s (available memory: %dMB, available non-profiled code cache: %dMB)",
-                      ct->name(), (int)(available_memory/M), (int)(available_cc_np/M));
+        if (TraceCompilerThreads)
+          tty->print_cr("Added compiler thread %s (available memory: %dMB, available non-profiled code cache: %dMB)",
+                        ct->name(), (int)(available_memory/M), (int)(available_cc_np/M));
+        if (xtty != nullptr) {
+          ttyLocker ttyl;
+          xtty->begin_elem("compiler_thread_added name='%s' compiler='%s' type='%d'",
+                           ct->name(), _compilers[1]->name(), _compilers[1]->type());
+          // print contextual stuff about why we are expanding the thread pool
+          xtty->print(" memory='%d' cache='%d'",
+                      (int)(available_memory/M), (int)(available_cc_np/M));
+          xtty->stamp();
+          xtty->end_elem();
+        }
       }
     }
   }
@@ -1888,6 +1925,12 @@ void CompileBroker::compiler_thread_loop() {
           if (TraceCompilerThreads) {
             tty->print_cr("Removing compiler thread %s after " JLONG_FORMAT " ms idle time",
                           thread->name(), thread->idle_time_millis());
+          }
+          if (xtty != nullptr) {
+            ttyLocker ttyl;
+            xtty->begin_elem("compiler_thread_removed name='%s'", thread->name());
+            xtty->stamp();
+            xtty->end_elem();
           }
 
           // Notify compiler that the compiler thread is about to stop

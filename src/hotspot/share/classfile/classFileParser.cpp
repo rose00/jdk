@@ -2875,11 +2875,13 @@ void ClassFileParser::parse_methods(const ClassFileStream* const cfs,
                                     bool is_interface,
                                     bool* const has_localvariable_table,
                                     bool* has_final_method,
+                                    bool* has_native_method,
                                     bool* declares_nonstatic_concrete_methods,
                                     TRAPS) {
   assert(cfs != nullptr, "invariant");
   assert(has_localvariable_table != nullptr, "invariant");
   assert(has_final_method != nullptr, "invariant");
+  assert(has_native_method != nullptr, "invariant");
   assert(declares_nonstatic_concrete_methods != nullptr, "invariant");
 
   assert(nullptr == _methods, "invariant");
@@ -2903,6 +2905,9 @@ void ClassFileParser::parse_methods(const ClassFileStream* const cfs,
 
       if (method->is_final()) {
         *has_final_method = true;
+      }
+      if (method->is_native()) {
+        *has_native_method = true;
       }
       // declares_nonstatic_concrete_methods: declares concrete instance methods, any access flags
       // used for interface initialization, and default method inheritance analysis
@@ -5331,6 +5336,9 @@ void ClassFileParser::fill_instance_klass(InstanceKlass* ik,
   if (_has_final_method) {
     ik->set_has_final_method();
   }
+  if (_has_native_method) {
+    ik->set_has_native_method();
+  }
 
   ik->copy_method_ordering(_method_ordering, CHECK);
   // The InstanceKlass::_methods_jmethod_ids cache
@@ -5901,6 +5909,7 @@ void ClassFileParser::parse_stream(const ClassFileStream* const stream,
                 _access_flags.is_interface(),
                 &_has_localvariable_table,
                 &_has_final_method,
+                &_has_native_method,
                 &_declares_nonstatic_concrete_methods,
                 CHECK);
 

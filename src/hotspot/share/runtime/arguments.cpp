@@ -4083,6 +4083,14 @@ jint Arguments::apply_ergo() {
       hashCode = 3;  // simple sequence numbers: the most repeatable
     }
   }
+  if (ReplayTraining) {
+    if (FLAG_IS_DEFAULT(TrainingFile)) {
+      TrainingFile = "hs_training.log";
+    }
+    if (FLAG_IS_DEFAULT(CompileCommandFile)) {
+      CompileCommandFile = TrainingFile;
+    }
+  }
 
   if (PrintCommandLineFlags) {
     JVMFlag::printSetFlags(tty);

@@ -652,6 +652,8 @@ protected:
   bool has_final_method() const         { return _access_flags.has_final_method(); }
   void set_has_finalizer()              { _access_flags.set_has_finalizer(); }
   void set_has_final_method()           { _access_flags.set_has_final_method(); }
+  bool has_native_method() const        { return _access_flags.has_native_method(); }
+  void set_has_native_method()          { _access_flags.set_has_native_method(); }
   bool has_vanilla_constructor() const  { return _access_flags.has_vanilla_constructor(); }
   void set_has_vanilla_constructor()    { _access_flags.set_has_vanilla_constructor(); }
   bool has_miranda_methods () const     { return access_flags().has_miranda_methods(); }

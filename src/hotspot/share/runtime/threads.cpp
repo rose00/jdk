@@ -571,9 +571,13 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
     *canTryAgain = false; // don't let caller call JNI_CreateJavaVM again
     return status;
   }
-  if (xtty != nullptr)
-    xtty->elem("vm_main_thread thread='" UINTX_FORMAT "'",
-               (uintx) main_thread->osthread()->thread_id());
+  if (xtty != nullptr) {
+    ttyLocker ttyl;
+    xtty->begin_elem("vm_main_thread thread='" UINTX_FORMAT "'",
+                     (uintx) main_thread->osthread()->thread_id());
+    xtty->stamp();
+    xtty->end_elem();
+  }
 
   JFR_ONLY(Jfr::on_create_vm_1();)
 
@@ -610,6 +614,12 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
     }
   }
 
+  if (xtty != nullptr) {
+    ttyLocker ttyl;
+    xtty->begin_elem("vm_initialized phase='0'");
+    xtty->stamp();
+    xtty->end_elem();
+  }
   assert(Universe::is_fully_initialized(), "not initialized");
   if (VerifyDuringStartup) {
     // Make sure we're starting with a clean slate.
@@ -635,6 +645,12 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   // Notify JVMTI agents that VM has started (JNI is up) - nop if no agents.
   JvmtiExport::post_early_vm_start();
 
+  if (xtty != nullptr) {
+    ttyLocker ttyl;
+    xtty->begin_elem("initialize_classes which='java/lang'");
+    xtty->stamp();
+    xtty->end_elem();
+  }
   initialize_java_lang_classes(main_thread, CHECK_JNI_ERR);
 
   quicken_jni_functions();
@@ -651,6 +667,12 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   MutexLocker::post_initialize();
 
   HOTSPOT_VM_INIT_END();
+  if (xtty != nullptr) {
+    ttyLocker ttyl;
+    xtty->begin_elem("vm_initialized phase='1'");
+    xtty->stamp();
+    xtty->end_elem();
+  }
 
   // record VM initialization completion time
 #if INCLUDE_MANAGEMENT
@@ -713,11 +735,24 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   // It is done after compilers are initialized, because otherwise compilations of
   // signature polymorphic MH intrinsics can be missed
   // (see SystemDictionary::find_method_handle_intrinsic).
+  if (xtty != nullptr) {
+    ttyLocker ttyl;
+    xtty->begin_elem("initialize_classes which='java/lang/invoke'");
+    xtty->stamp();
+    xtty->end_elem();
+  }
   initialize_jsr292_core_classes(CHECK_JNI_ERR);
 
   // This will initialize the module system.  Only java.base classes can be
   // loaded until phase 2 completes
   call_initPhase2(CHECK_JNI_ERR);
+
+  if (xtty != nullptr) {
+    ttyLocker ttyl;
+    xtty->begin_elem("vm_initialized phase='2'");
+    xtty->stamp();
+    xtty->end_elem();
+  }
 
   JFR_ONLY(Jfr::on_create_vm_2();)
 
@@ -759,6 +794,13 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
 
   // Notify JVMTI agents that VM initialization is complete - nop if no agents.
   JvmtiExport::post_vm_initialized();
+
+  if (xtty != nullptr) {
+    ttyLocker ttyl;
+    xtty->begin_elem("vm_initialized phase='3'");
+    xtty->stamp();
+    xtty->end_elem();
+  }
 
   JFR_ONLY(Jfr::on_create_vm_3();)
 
@@ -809,6 +851,13 @@ jint Threads::create_vm(JavaVMInitArgs* args, bool* canTryAgain) {
   if (DumpSharedSpaces) {
     MetaspaceShared::preload_and_dump();
     ShouldNotReachHere();
+  }
+
+  if (xtty != nullptr) {
+    ttyLocker ttyl;
+    xtty->begin_elem("vm_initialized phase='9999'");  //9999 => final phase
+    xtty->stamp();
+    xtty->end_elem();
   }
 
   return JNI_OK;
@@ -1000,6 +1049,9 @@ void Threads::create_vm_init_libraries() {
 
   for (agent = Arguments::libraries(); agent != nullptr; agent = agent->next()) {
     OnLoadEntry_t on_load_entry = lookup_jvm_on_load(agent);
+    if (xtty != nullptr) {
+      xtty->elem("vm_load_agent name='%s'", agent->name());
+    }
 
     if (on_load_entry != nullptr) {
       // Invoke the JVM_OnLoad function

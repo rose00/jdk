@@ -189,6 +189,7 @@ class ClassFileParser {
   bool _declares_nonstatic_concrete_methods;
   bool _has_localvariable_table;
   bool _has_final_method;
+  bool _has_native_method;
   bool _has_contended_fields;
 
   // precomputed flags
@@ -275,6 +276,7 @@ class ClassFileParser {
                      bool is_interface,
                      bool* const has_localvariable_table,
                      bool* const has_final_method,
+                     bool* const has_native_method,
                      bool* const declares_nonstatic_concrete_methods,
                      TRAPS);
 

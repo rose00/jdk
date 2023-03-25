@@ -143,8 +143,9 @@ void TrainingData::print_klass_attrs(xmlStream* xtty,
   int ikf = ik->access_flags().as_int() & (u2)-1;
   ikf &= ~JVM_ACC_SUPER;  // this is strictly noise
   char ikf2[20];
-  char* ikf2p = &ikf2[0];
-  if (ik->is_sealed()) { *ikf2p++ = 's'; }
+  char* ikf2p = &ikf2[0];  // note: keep 1-char flags in alphabetical order
+  if (ik->has_native_method()) { *ikf2p++ = 'n'; }
+  if (ik->is_sealed())         { *ikf2p++ = 's'; }
   *ikf2p = 0;
   // no need for is_hidden since the name makes it obvious
   xtty->print(" %skflags='%d%s'", prefix, ikf, &ikf2[0]);
@@ -265,9 +266,6 @@ void TrainingData::record_touch_common(xmlStream* xtty,
     }
     print_klass_attrs(xtty, k, prefix);
   }
-  if (!init_klass && !requesting_klass) {
-    xtty->print_raw(" requesting_klass=''");
-  }
   if (jit_task != nullptr) {
     xtty->print(" compile_id='%d'", jit_task->compile_id());
   }
@@ -294,6 +292,25 @@ void TrainingData::record_initialization_touch(const char* reason,
   record_touch_common(xtty, reason, /*jit_env*/ nullptr,
                       init_klass, requesting_klass,
                       name, sig, context);
+}
+
+void TrainingData::note_method_resolution(const LinkInfo& link_info,
+                                          Method* resolved_method,
+                                          TRAPS) {
+  // Somebody is linking to a method.  This is normally uninteresting.
+  if (resolved_method->is_native()) {
+    InstanceKlass* native_klass = resolved_method->method_holder();
+    TrainingData* tdata = native_klass->alloc_training_data(CHECK);
+    if (tdata == nullptr)  return;
+    Klass* requesting_klass = link_info.current_klass();
+    Klass* init_klass = THREAD->class_being_initialized();
+    ttyLocker ttyl;
+    tdata->record_touch_common(xtty, "native", /*jit_env*/ nullptr,
+                               init_klass, requesting_klass,
+                               resolved_method->name(),
+                               resolved_method->signature(),
+                               nullptr);
+  }
 }
 
 void TrainingData::record_jit_observation(ciEnv* env, ciBaseObject* what) {
