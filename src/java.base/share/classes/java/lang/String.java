@@ -46,6 +46,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Spliterator;
 import java.util.function.Function;
+import java.util.regex.MatchResult;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
@@ -3039,9 +3041,17 @@ public final class String
      * same result as the expression
      *
      * <blockquote>
-     * {@link java.util.regex.Pattern}.{@link java.util.regex.Pattern#matches(String,CharSequence)
-     * matches(<i>regex</i>, <i>str</i>)}
+     * <i>str</i>{@code .}{@link #matching(String)
+     * matcher}{@code (}<i>regex</i>{@code ).}{@link Matcher#matches()
+     * matches()}
      * </blockquote>
+     *
+     * <p> The regular expression may be compiled on the fly each time
+     * this method is called.  A {@linkplain #matching(Pattern)
+     * companion overloading} to {@code matching(String)} would allow
+     * a precompiled regular expression to be specified instead of a
+     * string in the above equivalent expression, avoiding the
+     * overhead of repeated regular expression compilations.
      *
      * @param   regex
      *          the regular expression to which this string is to be matched
@@ -3073,6 +3083,200 @@ public final class String
     }
 
     /**
+     * Creates a fresh {@link Matcher} object to match the given
+     * <a href="../util/regex/Pattern.html#sum">regular expression</a>
+     * within the characters of this string.
+     *
+     * <p> An invocation of this method of the form
+     * <i>str</i>{@code .matching(}<i>regex</i>{@code )}
+     * yields exactly the same result as the expression
+     *
+     * <blockquote>
+     * <code>
+     * {@link java.util.regex.Pattern}.{@link
+     * java.util.regex.Pattern#compile(String) compile}(<i>regex</i>).{@link
+     * java.util.regex.Pattern#matcher(java.lang.CharSequence) matcher}(<i>str</i>)
+     * </code>
+     * </blockquote>
+     *
+     * <p> This method only creates the matcher, and does not attempt
+     * a match of the given pattern.  To create a matcher and attempt
+     * an initial match, use {@link #firstMatch(String) firstMatch}.
+     *
+     * <p> The regular expression may be compiled on the fly each time this method
+     * is called.  A {@linkplain #matching(Pattern) companion overloading} allows
+     * a precompiled regular expression to be specified instead, avoiding the overhead
+     * of repeated regular expression compilations.
+     *
+     * @param   regex
+     *          the regular expression to which this string is to be matched
+     *
+     * @return  a fresh {@link Matcher} object to match the regular expression
+     *
+     * @throws  PatternSyntaxException
+     *          if the regular expression's syntax is invalid
+     *
+     * @see java.util.regex.Pattern
+     * @see java.util.regex.Matcher
+     * @see #matching(Pattern)
+     * @see #firstMatch(String)
+     *
+     * @since NN
+     */
+    public Matcher matching(String regex) {
+        return Pattern.compile(regex).matcher(this);
+    }
+
+    /**
+     * Creates a fresh {@link Matcher} object to match the given
+     * <a href="../util/regex/Pattern.html#sum">regular expression</a>
+     * within the characters of this string.  This method only creates
+     * the matcher, and does not attempt a match of the given pattern.
+     *
+     * <p> An invocation of this method of the form
+     * <i>str</i>{@code .matching(}<i>regex</i>{@code )}
+     * yields exactly the same result as the expression
+     *
+     * <blockquote>
+     * <code>
+     * <i>regex</i>.{@link
+     * java.util.regex.Pattern#matcher(java.lang.CharSequence) matcher}(<i>str</i>)
+     * </code>
+     * </blockquote>
+     *
+     * <p> This method only creates the matcher, and does not attempt
+     * a match of the given pattern.  To create a matcher and attempt
+     * an initial match, use {@link #firstMatch(Pattern) firstMatch}.
+     *
+     * <p> The regular expression must have been compiled previously.
+     * It is common practice to place compiled regular expressions in
+     * constant static fields.  If the regular expression is not a
+     * constant, a {@linkplain #matching(String) companion overloading}
+     * is available to compile the regular expression in the fly, at
+     * the expense of repeated regular expression compilations.
+     *
+     * @param   regex
+     *          a {@linkplain java.util.regex.Pattern#compile
+     *          compiled regular expression} to which this string is to be matched
+     *
+     * @return  a fresh {@link Matcher} object to match the regular expression
+     *
+     * @see java.util.regex.Pattern
+     * @see java.util.regex.Matcher
+     * @see #matching(String)
+     * @see #firstMatch(Pattern)
+     *
+     * @since NN
+     */
+    public Matcher matching(Pattern regex) {
+        return regex.matcher(this);
+    }
+
+    /**
+     * Finds the first match of the given <a
+     * href="../util/regex/Pattern.html#sum">regular expression</a>
+     * within this string, if it exists, then return a fresh matcher
+     * object which has just matched that pattern.  If there is no
+     * such match, return {@linkplain java.util.Optional#empty() an
+     * empty value}.
+     *
+     * <p> An invocation of this method of the form
+     * <i>str</i>{@code .firstMatch(}<i>regex</i>{@code )} yields
+     * exactly the same result as the expression
+     *
+     * <blockquote>
+     * <i>str</i>{@code .}{@link #matching(String)
+     * matcher}{@code (}<i>regex</i>{@code ).}{@link
+     * java.util.regex.Matcher#nextResult
+     * nextResult}{@code ()}
+     * </blockquote>
+     *
+     * A call to this method may be followed by {@link Optional#get()
+     * get}, {@link Optional#map map}, or some other method on {@link
+     * Optional}.  For example:
+     *
+     * <ul>
+     * <li> <i>str</i>{@code .firstMatch().get().group()} returns the
+     * substring corresponding to the first match, and throws {@code
+     * NoSuchElementException} if there is no match.
+     * </li>
+     * <li> <i>str</i>{@code .firstMatch().map(m->m.group()).orElse("none")}
+     * returns the substring corresponding to the first match, or
+     * else the string {@code "none"} if there is no match.
+     * </li>
+     * <li> <i>str</i>{@code .firstMatch().map(m->m.replacement("r=$2")).orElse("")}
+     * returns an expanded replacement string containing the second
+     * captured group (preceded by {@code "r="}), or else the empty
+     * string if there is no match.
+     * </li>
+     * <li> <i>str</i>{@code .firstMatch().map(m->{ var m1 =
+     * m.group(); return find() ? List.of(m1,m.group()) : List.of(m1);
+     * }).orElse(null)} returns a list of the first one or two match
+     * results in <i>str</i>.  If there is no match {@code null} is
+     * returned.
+     * </li>
+     * </ul>
+     *
+     * <p> The regular expression may be compiled on the fly each time
+     * this method is called.  A {@linkplain #matching(Pattern)
+     * companion overloading} to {@code matching(String)} would allow
+     * a precompiled regular expression to be specified instead of a
+     * string in the above equivalent expression, avoiding the
+     * overhead of repeated regular expression compilations.
+     *
+     * @param   regex
+     *          the regular expression to which this string is to be matched
+     *
+     * @return a fresh matcher for the first match, if any, else the empty result
+     *
+     * @since NN
+     */
+    public Optional<Matcher> firstMatch(String regex) {
+        return matching(regex).nextResult();
+    }
+
+    /**
+     * Finds the first match of the given <a
+     * href="../util/regex/Pattern.html#sum">regular expression</a>
+     * within this string, if it exists, then return a fresh matcher
+     * object which has just matched that pattern.  If there is no
+     * such match, return {@linkplain java.util.Optional#empty() an
+     * empty value}.
+     *
+     * <p> An invocation of this method of the form
+     * <i>str</i>{@code .firstMatch(}<i>regex</i>{@code )} yields
+     * exactly the same result as the expression
+     *
+     * <blockquote>
+     * <i>str</i>{@code .}{@link #matching(Pattern)
+     * matcher}{@code (}<i>regex</i>{@code ).}{@link
+     * java.util.regex.Matcher#nextResult
+     * nextResult}{@code ()}
+     * </blockquote>
+     *
+     * <p> The regular expression must have been compiled previously.
+     * It is common practice to place compiled regular expressions in
+     * constant static fields.  If the regular expression is not a
+     * constant, a {@linkplain #matching(String) companion overloading}
+     * is available to compile the regular expression in the fly, at
+     * the expense of repeated regular expression compilations.
+     *
+     * <p> See the {@linkplain #matching(String) companion
+     * overloading} for examples of usage.
+     *
+     * @param   regex
+     *          a {@linkplain java.util.regex.Pattern#compile
+     *          compiled regular expression} to which this string is to be matched
+     *
+     * @return a fresh matcher for the first match, if any, else the empty result
+     *
+     * @since NN
+     */
+    public Optional<Matcher> firstMatch(Pattern regex) {
+        return matching(regex).nextResult();
+    }
+
+    /**
      * Replaces the first substring of this string that matches the given <a
      * href="../util/regex/Pattern.html#sum">regular expression</a> with the
      * given replacement.
@@ -3082,20 +3286,26 @@ public final class String
      * yields exactly the same result as the expression
      *
      * <blockquote>
-     * <code>
-     * {@link java.util.regex.Pattern}.{@link
-     * java.util.regex.Pattern#compile(String) compile}(<i>regex</i>).{@link
-     * java.util.regex.Pattern#matcher(java.lang.CharSequence) matcher}(<i>str</i>).{@link
-     * java.util.regex.Matcher#replaceFirst(String) replaceFirst}(<i>repl</i>)
-     * </code>
+     * <i>str</i>{@code .}{@link #matching(String)
+     * matcher}{@code (}<i>regex</i>{@code ).}{@link
+     * java.util.regex.Matcher#replaceFirst(String)
+     * replaceFirst}{@code (}<i>repl</i>{@code )}
      * </blockquote>
      *
-     *<p>
+     * <p> The regular expression may be compiled on the fly each time
+     * this method is called.  A {@linkplain #matching(Pattern)
+     * companion overloading} to {@code matching(String)} would allow
+     * a precompiled regular expression to be specified instead of a
+     * string in the above equivalent expression, avoiding the
+     * overhead of repeated regular expression compilations.
+     *
+     * <p>
      * Note that backslashes ({@code \}) and dollar signs ({@code $}) in the
      * replacement string may cause the results to be different than if it were
      * being treated as a literal replacement string; see
-     * {@link java.util.regex.Matcher#replaceFirst}.
-     * Use {@link java.util.regex.Matcher#quoteReplacement} to suppress the special
+     * {@link java.util.regex.Matcher#replaceFirst Matcher.replaceFirst}.
+     * Use {@link java.util.regex.Matcher#quoteReplacement
+     * Matcher.quoteReplacement} to suppress the special
      * meaning of these characters, if desired.
      *
      * @param   regex
@@ -3126,20 +3336,26 @@ public final class String
      * yields exactly the same result as the expression
      *
      * <blockquote>
-     * <code>
-     * {@link java.util.regex.Pattern}.{@link
-     * java.util.regex.Pattern#compile(String) compile}(<i>regex</i>).{@link
-     * java.util.regex.Pattern#matcher(java.lang.CharSequence) matcher}(<i>str</i>).{@link
-     * java.util.regex.Matcher#replaceAll(String) replaceAll}(<i>repl</i>)
-     * </code>
+     * <i>str</i>{@code .}{@link #matching(String)
+     * matcher}{@code (}<i>regex</i>{@code ).}{@link
+     * java.util.regex.Matcher#replaceAll(String)
+     * replaceAll}{@code (}<i>repl</i>{@code )}
      * </blockquote>
+     *
+     * <p> The regular expression may be compiled on the fly each time
+     * this method is called.  A {@linkplain #matching(Pattern)
+     * companion overloading} to {@code matching(String)} would allow
+     * a precompiled regular expression to be specified instead of a
+     * string in the above equivalent expression, avoiding the
+     * overhead of repeated regular expression compilations.
      *
      *<p>
      * Note that backslashes ({@code \}) and dollar signs ({@code $}) in the
      * replacement string may cause the results to be different than if it were
      * being treated as a literal replacement string; see
      * {@link java.util.regex.Matcher#replaceAll Matcher.replaceAll}.
-     * Use {@link java.util.regex.Matcher#quoteReplacement} to suppress the special
+     * Use {@link java.util.regex.Matcher#quoteReplacement
+     * Matcher.quoteReplacement} to suppress the special
      * meaning of these characters, if desired.
      *
      * @param   regex
@@ -3299,7 +3515,6 @@ public final class String
      * </code>
      * </blockquote>
      *
-     *
      * @param  regex
      *         the delimiting regular expression
      *
@@ -3312,7 +3527,9 @@ public final class String
      * @throws  PatternSyntaxException
      *          if the regular expression's syntax is invalid
      *
-     * @see java.util.regex.Pattern
+     * @see java.util.regex.Pattern#split(CharSequence,int)
+     * @see java.util.regex.Matcher#splits(int,boolean)
+     * @see <a href="Pattern.html#split">rules for methods that split using a pattern</a>
      *
      * @since 1.4
      */
@@ -3412,6 +3629,10 @@ public final class String
      * @return  the array of strings computed by splitting this string
      *          around matches of the given regular expression, alternating
      *          substrings and matching delimiters
+     *
+     * @see java.util.regex.Pattern#splitWithDelimiters(CharSequence,int)
+     * @see java.util.regex.Matcher#splits(int,boolean)
+     * @see <a href="Pattern.html#split">rules for methods that split using a pattern</a>
      *
      * @since   21
      */
@@ -3530,12 +3751,76 @@ public final class String
      * @throws  PatternSyntaxException
      *          if the regular expression's syntax is invalid
      *
-     * @see java.util.regex.Pattern
+     * @see java.util.regex.Pattern#split(CharSequence,int)
+     * @see java.util.regex.Matcher#splits(int,boolean)
+     * @see <a href="Pattern.html#split">rules for methods that split using a pattern</a>
      *
      * @since 1.4
      */
     public String[] split(String regex) {
         return split(regex, 0, false);
+    }
+
+    /**
+     * Splits this string around matches of the given <a
+     * href="../util/regex/Pattern.html#sum">regular expression</a>,
+     * and returns a stream of {@linkplain MatchResult match results}.
+     * Each match result may be further queried for the location and
+     * text content of a span within the input text.
+     *
+     * <p> The precise rules and options are <a
+     * href="../util/regex/Pattern.html#split">described fully
+     * elsewhere</a>.  As described by those rules, if the {@code
+     * withDelimiters} parameter is {@code true}, the returned stream
+     * will be a mix of regular ("positive") and negative match
+     * results, reporting alternating delimiter matches and
+     * non-matching delimited spans; otherwise the stream will contain
+     * only {@linkplain MatchResult#isNegative negative matches} for
+     * non-matching spans.  The {@code limit} parameter, if positive,
+     * gives an exclusive upper bound to the number of attempted
+     * matches, while if it is zero all trailing zero-length match
+     * results will be dropped from the result stream.  The initial
+     * match result (if any) is always negative, so a leading
+     * delimiter is always preceded by a zero-length leading negative
+     * match.  As a special case, a zero-length leading delimiter is
+     * always dropped, along with its zero-length leading negative
+     * match.
+     *
+     * @apiNote An invocation of this method of the form
+     * <i>str.</i>{@code splitsWithMatches(}<i>regex</i>{@code ,}&nbsp;<i>limit</i>{@code ,}&nbsp;<i>withDelimiters</i>{@code )}
+     * yields exactly the same stream of results as the expression
+     *
+     * <blockquote>
+     * <i>str</i>{@code .}{@link #matching(String)
+     * matcher}{@code (}<i>regex</i>{@code ).}{@link
+     * java.util.regex.Matcher#splits(int,boolean)
+     * splits}{@code (}<i>limit</i>{@code ,}<i>withDelimiters</i>{@code )}
+     * </blockquote>
+     *
+     * <p> The regular expression may be compiled on the fly each time
+     * this method is called.  A {@linkplain #matching(Pattern)
+     * companion overloading} to {@code matching(String)} would allow
+     * a precompiled regular expression to be specified instead of a
+     * string in the above equivalent expression, avoiding the
+     * overhead of repeated regular expression compilations.
+     *
+     * @param  regex
+     *         the delimiting regular expression
+     * @param  limit
+     *         the threshold on the number of delimiters matched,
+     *         with an indication of whether to discard trailing empty results
+     * @param  withDelimiters
+     *         if {@code true} include results for delimiters
+     * @return a sequential stream of match results split from this string
+     *
+     * @see MatchResult#isNegative()
+     * @see Matcher#splits(int,boolean)
+     * @see Pattern#splitAsStream(CharSequence)
+     *
+     * @since NN
+     */
+    public Stream<MatchResult> splits(String regex, int limit, boolean withDelimiters) {
+        return Pattern.compile(regex).matcher(this).splits(limit, withDelimiters);
     }
 
     /**

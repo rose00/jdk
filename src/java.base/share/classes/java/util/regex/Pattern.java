@@ -791,9 +791,335 @@ import jdk.internal.util.regex.Grapheme;
  * O'Reilly and Associates, 2006.</a>
  * </p>
  *
+ * <h2><a id="split">Splitting by matching delimiter patterns</a></h2>
+ * An input character sequence may be split by the repeated
+ * application of a pattern, to locate delimiters matching the
+ * pattern, which separate complementary non-matching subsequences.
+ * Several methods perform such splitting and are controlled by a
+ * common set of rules and configuration options.  In their specific
+ * details, these rules follow historical precedent.
+ *
+ * <p> A split operation splits an input sequence around matches of
+ * the given regular expression and returns the unmatched strings and,
+ * in some cases, also the matching delimiters.  For purposes of this
+ * description, we will refer to the subsequences matched as
+ * delimiters as <i>positive matches</i>.  The other subsequences of
+ * non-matching characters between the positive matches will be called
+ * <i>negative matches</i>, for this description.
+ *
+ * <p> The sequence of results may be produced directly as a whole
+ * array, or as a {@link java.util.stream.Stream} to be further
+ * manipulated.  The individual results may be represented directly as
+ * {@link String}s, or else as {@link MatchResult} objects which
+ * {@linkplain MatchResult#group() correspond to those strings}.
+ * When a distinction is required between positive and negative
+ * matches, it can be inferred by context, and may also be {@linkplain
+ * MatchResult#isNegative queried directly} from a {@link MatchResult}
+ * object.
+ *
+ * <p> Splitting may be modified by a {@code withDelimiters} option.
+ * If that option is not present, or is {@code false}, all positive
+ * matches (i.e., the delimiter strings) will be discarded from the
+ * final result, leaving only the negative matches (i.e., the strings
+ * around the delimiters).  This is the simplest splitting behavior,
+ * reporting everything except the matched delimiters.  Nevertheless
+ * is useful to document the details of splitting by referring to the
+ * positive matches, whether they are to be discarded or not.
+ *
+ * <p> Splitting may also be modified by a {@code limit} option,
+ * described below, which can limit the number of matches.
+ * 
+ * <p> The match results are returned in the same order as the
+ * matching subsequences in the input sequence.  Before any match
+ * results are discarded, all match results exhaustively partition the
+ * input sequence.  Thus, if the {@code withDelimiters} option is
+ * {@code true}, each character of the input sequence falls within the
+ * span of exactly one match result, either positive for a delimiter
+ * or negative for a span of delimited text.
+ *
+ * <p> In the sequence of match results, before any results are
+ * discarded, negative results occur at even positions and positive
+ * results occur at odd positions.  In fact, every positive result
+ * occurs between two negative results.  Empty negative matches are
+ * inserted as needed to separate positive results from each other and
+ * from the start and end of the input character sequence.  Even if
+ * the regular match results are discarded, such empty negative
+ * matches are retained.  In this way, even if the complete series of
+ * match results is reduced to strings, the kind of each match
+ * (regular delimiter or negative non-delimiter text) can be inferred
+ * from the sequence of results.  The number of matched delimiters may
+ * also be inferred, apart from effect of discarding zero-length
+ * results (when <i>limit</i> is zero, as described below).
+ *
+ * <p> The first result (if there are any results) is always a
+ * negative match spanning whatever initial part of the input sequence
+ * which was not matched.  If the first delimiter match occurred at
+ * the beginning of the sequence, the first result is an empty
+ * negative match.  Similarly, but before the optional removal of
+ * empty elements, the last element of the stream is always a negative
+ * match corresponding to a trailing part of the input sequence which
+ * was not matched.  If the last delimiter match reached the end of
+ * the sequence, then the last element will be an empty negative
+ * match, which is removed only if {@code limit} is zero or absent.
+ *
+ * <p> There might be no delimiters matched.  This can happen because
+ * a <i>limit</i> of one prevented any match attempts, or because the
+ * first match attempt failed.  In either case, there is exactly one
+ * element in the resulting stream, a negative match for the whole
+ * sequence.  This is an exception to the rule that a <i>limit</i> of
+ * zero causes trailing empty matches to be stripped, because such an
+ * empty result, representing the whole input sequence, is retained
+ * regardless of regardless of <i>limit</i> setting.
+ *
+ * <p> As a result of these rules, the sequence of results will be
+ * empty only under rather unusual circumstances.  Suppose the
+ * input sequence is non-empty, and every character in it is
+ * matched as part of a delimiter. Then if <i>withDelimiters</i>
+ * is {@code false}, the delimiter matches are dropped, leaving
+ * only negative matches for empty strings.  Finally, if
+ * <i>limit</i> is zero, all these negative empty matches will be
+ * removed, which is the only way to obtain an empty sequence of
+ * results.  Note that if the input sequence is empty to begin
+ * with, there must be exactly one zero-length result.
+ *
+ * <p> The first pair of results must not both be empty.  To enforce
+ * this, a delimiter match of length zero (such as for {@code "\\b"}
+ * or {@code "(?=foo)"}) is discarded at the first input character
+ * position.  If the {@code limit} option is present, a delimiter
+ * match discarded by this rule is <i>not counted</i> against any
+ * match limit.  According to the normal {@linkplain Matcher#find()
+ * rule for searches}, any regular expression match after a
+ * zero-length match can only happen after skipping at least one
+ * character, so this rule cannot be applied twice.  Following the
+ * other rules for splitting, that next delimiter match determines the
+ * length of the initial negative match of the result, which is
+ * therefore non-empty.  Note that for unusual patterns (such as
+ * {@code ":*"} splitting {@code ":B"}), it is possible for adjacent
+ * empty results to appear, but such an empty pair is suppressed only
+ * at the very beginning of the splitting process.
+ *
+ * <p> The {@code limit} option controls the number of times the
+ * pattern is applied and therefore affects the length of the sequence
+ * of results.
+ * <ul>
+ *    <li> If the <i>limit</i> is positive then the pattern will be
+ *    applied at most <i>limit</i>&nbsp;-&nbsp;1 times; the last
+ *    result (which is a negative match) may span unmatched
+ *    occurrences of the delimiter pattern.</li>
+ *
+ *    <li> If the <i>limit</i> is zero or negative or absent then the
+ *    pattern will be applied as many times as possible and the
+ *    stream's length is not limited.</li>
+ *
+ *    <li> If the <i>limit</i> is zero or absent then trailing empty
+ *    match results (those of either kind, negative or positive, which
+ *    span no input characters), will be discarded.</li>
+ *
+ *    <li> If the {@code withDelimiters} option is {@code false} or
+ *    absent and <i>limit</i> is positive, the streams's length will
+ *    be no greater than <i>limit</i>, counting at most
+ *    <i>limit</i>&nbsp;-&nbsp;1 delimited spans each corresponding to
+ *    a delimiter match, followed by a final delimited span not
+ *    corresponding to a following delimiter match.</li>
+ *
+ *    <li> If the {@code withDelimiters} option is {@code true} or
+ *    absent and <i>limit</i> is non-zero, the streams's length will
+ *    be an odd number, counting a number of pairs delimited spans
+ *    followed by delimiter matches, followed by a final delimited
+ *    span not corresponding to a following delimiter match.  If
+ *    <i>limit</i> is positive, the length will be no greater than
+ *    2&nbsp;&times;&nbsp;<i>limit</i>&nbsp;-&nbsp;1.</li>
+ *
+ * </ul>
+ *
+ * <p> A simple delimiter pattern like {@code ":"} or {@code "\\s+"}
+ * splits an input string in a straightforward way, because it is
+ * context free and matches at least one character.  A delimiter
+ * pattern like {@code "\\b"}, which might be empty, or might have
+ * lookahead or lookbehind, is less straightforward.  In the following
+ * table we show how a range of sample delimiter patterns split some
+ * simple inputs, under all the relevant {@code limit} parameters.  To
+ * make reading simpler, we surround delimiter matches (positive
+ * matches) with parentheses, and all matches with blank space.  The
+ * result of splitting without delimiters can be visualized by
+ * ignoring the parenthesized negative matches.  Empty strings are
+ * made more visible by using an epsilon &epsilon;.
+ *
+ * <table class="plain" style="margin-left:2em;">
+ * <caption style="display:none">Examples showing regex, sample, limit, and result</caption>
+ * <thead>
+ * <tr>
+ *     <th scope="col">Regex</th>
+ *     <th scope="col">Sample</th>
+ *     <th scope="col">Limit</th>
+ *     <th scope="col">Result</th>
+ * </tr>
+ * </thead>
+ * <tbody>
+ * <tr><th scope="row" rowspan="11" style="font-weight:normal">:</th>
+ *     <th scope="row" rowspan="4" style="font-weight:normal">A:B::C</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">&le;0 or &ge;4</th>
+ *     <td>A (:) B (:) &epsilon; (:) C</td></tr>
+ * <tr><!-- : -->
+ *     <!-- A:B::C -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">3</th>
+ *     <td>A (:) B (:) :C</td></tr>
+ * <tr><!-- : -->
+ *     <!-- A:B::C -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">2</th>
+ *     <td>A (:) B::C</td></tr>
+ * <tr><!-- : -->
+ *     <!-- A:B::C -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">1</th>
+ *     <td>A:B::C</td></tr>
+ * <tr><!-- : -->
+ *     <th scope="row" style="font-weight:normal">A</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em"><i>any</i></th>
+ *     <td>A</td></tr>
+ * <tr><!-- : -->
+ *     <th scope="row" rowspan="3" style="font-weight:normal">:A:</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">0</th>
+ *     <td>&epsilon; (:) A (:)</td></tr>
+ * <tr><!-- : -->
+ *     <!-- :A: -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">&le;-1 or &ge;3</th>
+ *     <td>&epsilon; (:) A (:) &epsilon;</td></tr>
+ * <tr><!-- : -->
+ *     <!-- :A: -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">2</th>
+ *     <td>&epsilon; (:) A:</td></tr>
+ * <tr><!-- : -->
+ *     <th scope="row" rowspan="2" style="font-weight:normal">:</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">0</th>
+ *     <td>&epsilon; (:)</td></tr>
+ * <tr><!-- : -->
+ *     <!-- : -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">&le;-1 or &ge;2</th>
+ *     <td>&epsilon; (:) &epsilon;</td></tr>
+ * <tr><!-- : -->
+ *     <th scope="row" style="font-weight:normal">&epsilon;</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em"><i>any</i></th>
+ *     <td>&epsilon;</td></tr>
+ * <tr><th scope="row" rowspan="4" style="font-weight:normal">:+</th>
+ *     <th scope="row" style="font-weight:normal">A</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em"><i>any</i></th>
+ *     <td>A</td></tr>
+ * <tr><!-- :+ -->
+ *     <th scope="row" rowspan="3" style="font-weight:normal">:A:</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">0</th>
+ *     <td>&epsilon; (:) A (:)</td></tr>
+ * <tr><!-- :+ -->
+ *     <!-- :A: -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">&le;-1 or &ge;3</th>
+ *     <td>&epsilon; (:) A (:) &epsilon;</td></tr>
+ * <tr><!-- :+ -->
+ *     <!-- :A: -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">2</th>
+ *     <td>&epsilon; (:) A:</td></tr>
+ * <tr><th scope="row" rowspan="2" style="font-weight:normal">(?=:)</th>
+ *     <th scope="row" style="font-weight:normal">A</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em"><i>any</i></th>
+ *     <td>A</td></tr>
+ * <tr><!-- (?=:) -->
+ *     <th scope="row" style="font-weight:normal">:A:</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">&le;0 or &ge;2</th>
+ *     <td>:A (&epsilon;) :</td></tr>
+ * <tr><th scope="row" rowspan="8" style="font-weight:normal">:*</th>
+ *     <th scope="row" rowspan="2" style="font-weight:normal">A</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">0</th>
+ *     <td>A</td></tr>
+ * <tr><!-- :* -->
+ *     <!-- A -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">&le;-1 or &ge;2</th>
+ *     <td>A (&epsilon;) &epsilon;</td></tr>
+ * <tr><!-- :* -->
+ *     <th scope="row" rowspan="6" style="font-weight:normal">:A:</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">0</th>
+ *     <td>&epsilon; (:) &epsilon; (&epsilon;) A (:)</td></tr>
+ * <tr><!-- :* -->
+ *     <!-- :A: -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">&le;-1 or &ge;5</th>
+ *     <td>&epsilon; (:) &epsilon; (&epsilon;) A (:) &epsilon; (&epsilon;) &epsilon;</td></tr>
+ * <tr><!-- :* -->
+ *     <!-- :A: -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">4</th>
+ *     <td>&epsilon; (:) &epsilon; (&epsilon;) A (:) &epsilon;</td></tr>
+ * <tr><!-- :* -->
+ *     <!-- :A: -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">3</th>
+ *     <td>&epsilon; (:) &epsilon; (&epsilon;) A:</td></tr>
+ * <tr><!-- :* -->
+ *     <!-- :A: -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">2</th>
+ *     <td>&epsilon; (:) A:</td></tr>
+ * <tr><!-- :* -->
+ *     <!-- :A: -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">1</th>
+ *     <td>:A:</td></tr>
+ * <tr><th scope="row" rowspan="4" style="font-weight:normal">\b</th>
+ *     <th scope="row" rowspan="2" style="font-weight:normal">A</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">0</th>
+ *     <td>A</td></tr>
+ * <tr><!-- \b -->
+ *     <!-- A -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">&le;-1 or &ge;2</th>
+ *     <td>A (&epsilon;) &epsilon;</td></tr>
+ * <tr><!-- \b -->
+ *     <th scope="row" rowspan="2" style="font-weight:normal">:A:</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">&le;0 or &ge;3</th>
+ *     <td>: (&epsilon;) A (&epsilon;) :</td></tr>
+ * <tr><!-- \b -->
+ *     <!-- :A: -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">2</th>
+ *     <td>: (&epsilon;) A:</td></tr>
+ * <tr><th scope="row" rowspan="8" style="font-weight:normal">&epsilon;</th>
+ *     <th scope="row" rowspan="5" style="font-weight:normal">ABC</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">0</th>
+ *     <td>A (&epsilon;) B (&epsilon;) C</td></tr>
+ * <tr><!-- &epsilon; -->
+ *     <!-- ABC -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">&le;-1 or &ge;4</th>
+ *     <td>A (&epsilon;) B (&epsilon;) C (&epsilon;) &epsilon;</td></tr>
+ * <tr><!-- &epsilon; -->
+ *     <!-- ABC -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">3</th>
+ *     <td>A (&epsilon;) B (&epsilon;) C</td></tr>
+ * <tr><!-- &epsilon; -->
+ *     <!-- ABC -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">2</th>
+ *     <td>A (&epsilon;) BC</td></tr>
+ * <tr><!-- &epsilon; -->
+ *     <!-- ABC -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">1</th>
+ *     <td>ABC</td></tr>
+ * <tr><!-- &epsilon; -->
+ *     <th scope="row" rowspan="2" style="font-weight:normal">A</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">0</th>
+ *     <td>A</td></tr>
+ * <tr><!-- &epsilon; -->
+ *     <!-- A -->
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">&le;-1 or &ge;2</th>
+ *     <td>A (&epsilon;) &epsilon;</td></tr>
+ * <tr><!-- &epsilon; -->
+ *     <th scope="row" style="font-weight:normal">&epsilon;</th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em"><i>any</i></th>
+ *     <td>&epsilon;</td></tr>
+ * <tr><th scope="row" style="font-weight:normal"><i>any</i></th>
+ *     <th scope="row" style="font-weight:normal"><i>any S</i></th>
+ *     <th scope="row" style="font-weight:normal; text-align:right; padding-right:1em">1</th>
+ *     <td><i>same S</i></td></tr>
+ * </tbody>
+ * </table>
+ *
+ * <p> For more examples of how splitting is affected by the limit
+ * parameter, see the documentation for {@link #split(CharSequence,int)}
+ * and {@link #splitWithDelimiters(CharSequence,int)}.
+ *
  * @spec https://www.unicode.org/reports/tr18 Unicode Regular Expressions
  * @see java.lang.String#split(String, int)
  * @see java.lang.String#split(String)
+ * @see Matcher#splits(int,boolean)
+ * @see Matcher#resultsWithNegatives()
  *
  * @author      Mike McCloskey
  * @author      Mark Reinhold
@@ -1239,7 +1565,7 @@ public final class Pattern
      * of the resulting array. A zero-width match at the beginning however
      * never produces such empty leading substring.
      *
-     * <p> The {@code limit} parameter controls the number of times the
+     * <p> The {@code limit} option controls the number of times the
      * pattern is applied and therefore affects the length of the resulting
      * array.
      * <ul>
@@ -1301,6 +1627,9 @@ public final class Pattern
      *
      * @return  The array of strings computed by splitting the input
      *          around matches of this pattern
+     *
+     * @see <a href="Pattern.html#split">rules for methods that split using a pattern</a>
+     *
      */
     public String[] split(CharSequence input, int limit) {
         return split(input, limit, false);
@@ -1339,7 +1668,8 @@ public final class Pattern
      *
      *    <li> If the <i>limit</i> is zero then the pattern will be applied as
      *    many times as possible, the array can have any length, and trailing
-     *    empty strings, whether substrings or delimiters, will be discarded.</li>
+     *    empty strings, whether substrings or delimiters, will be discarded,
+     *    except in the special case where the input sequence was empty.</li>
      *
      *    <li> If the <i>limit</i> is negative then the pattern will be applied
      *    as many times as possible and the array can have any length.</li>
@@ -1388,6 +1718,8 @@ public final class Pattern
      * @return  The array of strings computed by splitting the input
      *          around matches of this pattern, alternating
      *          substrings and matching delimiters
+     *
+     * @see <a href="Pattern.html#split">rules for methods that split using a pattern</a>
      *
      * @since   21
      */
@@ -1450,7 +1782,8 @@ public final class Pattern
      * <p> This method works as if by invoking the two-argument {@link
      * #split(java.lang.CharSequence, int) split} method with the given input
      * sequence and a limit argument of zero.  Trailing empty strings are
-     * therefore not included in the resulting array. </p>
+     * therefore not included in the resulting array, except when the input
+     * sequence is empty. </p>
      *
      * <p> The input {@code "boo:and:foo"}, for example, yields the following
      * results with these expressions:
@@ -1477,6 +1810,8 @@ public final class Pattern
      *
      * @return  The array of strings computed by splitting the input
      *          around matches of this pattern
+     *
+     * @see <a href="Pattern.html#split">rules for methods that split using a pattern</a>
      */
     public String[] split(CharSequence input) {
         return split(input, 0, false);
@@ -6034,7 +6369,9 @@ NEXT:       while (i <= last) {
      *
      * <p> If this pattern does not match any subsequence of the input then
      * the resulting stream has just one element, namely the input sequence in
-     * string form.
+     * string form.  If the input sequence is empty, a single empty stream
+     * is returned, and (in this case only) is not discarded as a trailing
+     * empty string.
      *
      * <p> When there is a positive-width match at the beginning of the input
      * sequence then an empty leading substring is included at the beginning
@@ -6051,6 +6388,8 @@ NEXT:       while (i <= last) {
      * @return  The stream of strings computed by splitting the input
      *          around matches of this pattern
      * @see     #split(CharSequence)
+     *
+     * @see <a href="Pattern.html#split">rules for methods that split using a pattern</a>
      * @since   1.8
      */
     public Stream<String> splitAsStream(final CharSequence input) {

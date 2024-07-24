@@ -33,7 +33,9 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.regex.Pattern;
+import java.util.regex.MatchResult;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
@@ -45,12 +47,25 @@ public class SplitWithDelimitersTest {
         for (int i = 0; i < a.length; i += 2) {
             r[i / 2] = a[i];
         }
-        int len = r.length;
         if (limit == 0) {
             /* Also drop trailing empty strings */
-            for (; len > 0 && r[len - 1].isEmpty(); --len);  // empty body
+            r = dropTrailingEmpties(r);
         }
-        return len < r.length ? Arrays.copyOf(r, len) : r;
+        return r;
+    }
+
+    private static String[] dropTrailingEmpties(String[] a) {
+        int len = a.length;
+        for (; len > 0 && a[len - 1].isEmpty(); --len);  // empty body
+        return len < a.length ? Arrays.copyOf(a, len) : a;
+    }
+
+    private static String[] dropEvenIndexed(String[] a) {
+        String[] r = new String[a.length / 2];
+        for (int i = 1; i < a.length; i += 2) {
+            r[i / 2] = a[i];
+        }
+        return r;
     }
 
     static Arguments[] testSplit() {
@@ -102,21 +117,140 @@ public class SplitWithDelimitersTest {
                         "bb", "b*|a*", 0),
                 arguments(new String[] {"", "bb", "", "", ""},
                         "bb", "b*|a*", -1),
+
+                arguments(new String[] {"A", ":", "B", ":", "", ":", "C"},
+                          "A:B::C", ":", -1),
+                arguments(new String[] {"A", ":", "B", ":", ":C"},
+                          "A:B::C", ":", 3),
+                arguments(new String[] {"A", ":", "B::C"},
+                          "A:B::C", ":", 2),
+                arguments(new String[] {"A:B::C"},
+                          "A:B::C", ":", 1),
+                arguments(new String[] {"A"},
+                          "A", ":", -1),
+                arguments(new String[] {"", ":", "A", ":"},
+                          ":A:", ":", 0),
+                arguments(new String[] {"", ":", "A", ":", ""},
+                          ":A:", ":", -1),
+                arguments(new String[] {"", ":", "A:"},
+                          ":A:", ":", 2),
+                arguments(new String[] {"", ":"},
+                          ":", ":", 0),
+                arguments(new String[] {"", ":", ""},
+                          ":", ":", -1),
+                arguments(new String[] {""},
+                          "", ":", -1),
+                arguments(new String[] {"A"},
+                          "A", ":+", -1),
+                arguments(new String[] {"", ":", "A", ":"},
+                          ":A:", ":+", 0),
+                arguments(new String[] {"", ":", "A", ":", ""},
+                          ":A:", ":+", -1),
+                arguments(new String[] {"", ":", "A:"},
+                          ":A:", ":+", 2),
+                arguments(new String[] {"A"},
+                          "A", "(?=:)", -1),
+                arguments(new String[] {":A", "", ":"},
+                          ":A:", "(?=:)", -1),
+                arguments(new String[] {"A"},
+                          "A", ":*", 0),
+                arguments(new String[] {"A", "", ""},
+                          "A", ":*", -1),
+                arguments(new String[] {"", ":", "", "", "A", ":"},
+                          ":A:", ":*", 0),
+                arguments(new String[] {"", ":", "", "", "A", ":", "", "", ""},
+                          ":A:", ":*", -1),
+                arguments(new String[] {"", ":", "", "", "A", ":", ""},
+                          ":A:", ":*", 4),
+                arguments(new String[] {"", ":", "", "", "A:"},
+                          ":A:", ":*", 3),
+                arguments(new String[] {"", ":", "A:"},
+                          ":A:", ":*", 2),
+                arguments(new String[] {":A:"},
+                          ":A:", ":*", 1),
+                arguments(new String[] {"A"},
+                          "A", "\\b", 0),
+                arguments(new String[] {"A", "", ""},
+                          "A", "\\b", -1),
+                arguments(new String[] {":", "", "A", "", ":"},
+                          ":A:", "\\b", -1),
+                arguments(new String[] {":", "", "A:"},
+                          ":A:", "\\b", 2),
+                arguments(new String[] {"A", "", "B", "", "C"},
+                          "ABC", "", 0),
+                arguments(new String[] {"A", "", "B", "", "C", "", ""},
+                          "ABC", "", -1),
+                arguments(new String[] {"A", "", "B", "", "C"},
+                          "ABC", "", 3),
+                arguments(new String[] {"A", "", "BC"},
+                          "ABC", "", 2),
+                arguments(new String[] {"ABC"},
+                          "ABC", "", 1),
+                arguments(new String[] {"A"},
+                          "A", "", 0),
+                arguments(new String[] {"A", "", ""},
+                          "A", "", -1),
+                arguments(new String[] {""},
+                          "", "", -1),
         };
     }
 
     @ParameterizedTest
     @MethodSource
     void testSplit(String[] expected, String target, String regex, int limit) {
+        // First split with delimiters included.
         String[] computedWith = target.splitWithDelimiters(regex, limit);
         assertArrayEquals(expected, computedWith);
         String[] patComputedWith = Pattern.compile(regex).splitWithDelimiters(target, limit);
         assertArrayEquals(computedWith, patComputedWith);
 
+        // Then split without delimiters.
         String[] computedWithout = target.split(regex, limit);
         assertArrayEquals(dropOddIndexed(expected, limit), computedWithout);
         String[] patComputedWithout = Pattern.compile(regex).split(target, limit);
         assertArrayEquals(computedWithout, patComputedWithout);
+
+        // Demonstrate the relation between the delimiter substream and Matcher::results.
+        if (limit != 0) {
+            String[] streamDelim = target.matching(regex).results()
+                .filter(m -> m.end() > 0)  // drop leading zero-length match
+                .limit(limit <= 0 ? Long.MAX_VALUE : limit - 1)
+                .map(MatchResult::group).toArray(String[]::new);
+            assertArrayEquals(dropEvenIndexed(expected), streamDelim);
+        }
+
+        // Make sure the stream-based splitter gives the correct sequence of results.
+        String[] streamWith = target.matching(regex).splits(limit, true).map(MatchResult::group).toArray(String[]::new);
+        assertArrayEquals(computedWith, streamWith);
+        String[] streamWithout = target.matching(regex).splits(limit, false).map(MatchResult::group).toArray(String[]::new);
+        assertArrayEquals(computedWithout, streamWithout);
+
+        // Simulate splitting with the more regular resultsWithNegatives streams.
+        // Oddity #1: split pretends a leading empty delimiter (LED) never happened.
+        boolean dropFirst = (target.firstMatch(regex).map(m -> m.end() == 0).orElse(false));
+        // Oddity #2: split uses an exclusive limit, which does not apply to an LED if present.
+        int matchC = limit > 0 ? limit - 1 + (dropFirst ? 1 : 0) : -1;
+        String[] fromNStreamWith =
+            target.matching(regex).resultsWithNegatives(matchC)
+                .dropWhile(m -> dropFirst && m.end() == 0)
+                .map(MatchResult::group).toArray(String[]::new);
+        String[] fromNStreamWithout =
+            target.matching(regex).resultsWithNegatives(matchC)
+                .dropWhile(m -> dropFirst && m.end() == 0)
+                .filter(MatchResult::isNegative)
+                .map(MatchResult::group).toArray(String[]::new);
+        if (target.isEmpty()) {
+            // Oddity #3: An empty string splits to a single copy of itself, regardless of other rules.
+            // We stripped all leading empty matches, but we must put back exactly one.
+            fromNStreamWith = fromNStreamWithout = new String[] { "" };
+        } else if (limit == 0) {
+            // Oddity #4: A limit of zero is much like -1 but it cleans up trailing empties.
+            fromNStreamWith = dropTrailingEmpties(fromNStreamWith);
+            fromNStreamWithout = dropTrailingEmpties(fromNStreamWithout);
+        }
+        // Other than those oddities, splitWD produces a regular series of -/+/- matches.
+        assertArrayEquals(computedWith, fromNStreamWith);
+        assertArrayEquals(computedWithout, fromNStreamWithout);
     }
 
 }

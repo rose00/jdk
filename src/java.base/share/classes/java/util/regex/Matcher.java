@@ -26,11 +26,13 @@
 package java.util.regex;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.ConcurrentModificationException;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.function.Consumer;
@@ -79,7 +81,15 @@ import java.util.stream.StreamSupport;
  * the result into an existing string buffer or string builder. Alternatively,
  * the more convenient {@link #replaceAll replaceAll} method can be used to
  * create a string in which every matching subsequence in the input sequence
- * is replaced.
+ * is replaced.  There is also a stream-based presentation of the
+ * subsequences traversed by {@link #replaceAll replaceAll}, called
+ * {@link resultsWithNegatives() resultsWithNegatives}, which can
+ * perform the same functions as {@link #replaceAll replaceAll}, and
+ * more.  To work with match replacements as separate strings,
+ * isolated from the surrounding input text, use {@link
+ * #replacement replacement} for the current match, or {@link
+ * #replacements replacements} for a stream of replacements for a *
+ * #series of successive matches.
  *
  * <p> The explicit state of a matcher includes the start and end indices of
  * the most recent successful match.  It also includes the start and end
@@ -163,11 +173,24 @@ public final class Matcher implements MatchResult {
 
     /**
      * The end index of what matched in the last match operation.
+     * This is used only for the \G construct.  It is not necessarily
+     * the true previous match end, because it is bumped forward
+     * by one if the previous match had zero length.
      */
     int oldLast = -1;
 
     /**
+     * This is the accurate end index of the match operation before
+     * the current one, or the region beginning if there is no current
+     * match, and/or no previous match.  It is used to locate the
+     * negative match result before the current (positive) match
+     * result.
+     */
+    int previousMatchLast = 0;
+
+    /**
      * The index of the last position appended in a substitution.
+     * Used only by appendReplacement and appendTail.
      */
     int lastAppendPosition = 0;
 
@@ -273,13 +296,15 @@ public final class Matcher implements MatchResult {
      * @since 1.5
      */
     public MatchResult toMatchResult() {
-        int minStart;
+        int minStart, maxEnd;
         String capturedText;
         if (hasMatch()) {
-            minStart = minStart();
-            capturedText = text.subSequence(minStart, maxEnd()).toString();
+            long minMax = minMaxStartEnd();
+            minStart = (int)(minMax >> 32);
+            maxEnd = (int)minMax;
+            capturedText = minStart == maxEnd ? "" : text.subSequence(minStart, maxEnd).toString();
         } else {
-            minStart = -1;
+            minStart = -1;  // this signals "no match"
             capturedText = null;
         }
         return new ImmutableMatchResult(first, last, groupCount(),
@@ -287,26 +312,105 @@ public final class Matcher implements MatchResult {
                 namedGroups(), minStart);
     }
 
-    private int minStart() {
-        int r = text.length();
-        for (int group = 0; group <= groupCount(); ++group) {
-            int start = groups[group * 2];
-            if (start >= 0) {
-                r = Math.min(r, start);
+    private long minMaxStartEnd() {
+        // Get both min and max results in one simple pass over the array.
+        int[] groups = this.groups;
+        int min = groups[0];
+        int max = groups[1];
+        // You might think that min/max are always groups[0]/groups[1].
+        // If that were true then every group would be a substring of group zero.
+        // But that fails when a context match captures text outside the match proper.
+        // Example: "football".replaceAll("(?<=(foo))...", "<$1/$0>") ==> "foo<foo/tba>ll"
+        for (int i = groups.length; i > 2; ) {
+            int end = groups[--i];
+            if (max < end) {  // rarely taken branch
+                max = end;
+            }
+            int start = groups[--i];
+            if (min > start && start >= 0) {  // rarely taken branch
+                min = start;
             }
         }
-        return r;
+        return ((long)min << 32) + max;
     }
 
-    private int maxEnd() {
-        int r = 0;
-        for (int group = 0; group <= groupCount(); ++group) {
-            int end = groups[group * 2 + 1];
-            if (end >= 0) {
-                r = Math.max(r, end);
-            }
+    /**
+     * Returns a {@link MatchResult#isNegative negative match result}.
+     * for this matcher, as a {@link MatchResult} which spans all
+     * consecutive unmatched characters adjacent to the current match,
+     * on the left if {@code rightSide} is {@code false}, on the
+     * right otherwise.  If there is no current match, either because
+     * there was never a match (since the last reset) or because the
+     * last match attempt failed, then the parameter is ignored and
+     * all consecutive unmatched characters up to the end of the
+     * region are spanned.
+     *
+     * <p> The result is unaffected by subsequent operations performed
+     * upon this matcher.
+     *
+     * <p> The beginning of the returned span of characters is the end
+     * of the most recent successful match (since the last reset),
+     * including the current match if and only if {@code rightSide}
+     * is {@code true}.  The end of the returned span of characters is
+     * the beginning of the current match, only if there is one and
+     * only if {@code rightSide} is {@code false}.  Otherwise the
+     * end of the returned span of characters is the end of the region.
+     *
+     * @param rightSide controls which side of the current match to
+     *          locate a consecutive span of never-matched characters.
+     *          If {@code true}, the span is after any current match;
+     *          otherwise, it is before any current match.
+     * @return  a negative {@code MatchResult} containing the most
+     *          recent unmatched span of text
+     * @since NN
+     * @see #toNegativeMatchResult(int,int)
+     * @see #resultsWithNegatives()
+     * @see #splits
+     */
+    public MatchResult toNegativeMatchResult(boolean rightSide) {
+        int start, end;
+        if (!hasMatch()) {
+            start = previousMatchLast;   // last successful match or else beginning of region
+            end = to;                    // ... to end of region
+        } else if (!rightSide) {
+            start = previousMatchLast;   // previous match or else beginning of region
+            end = first;                 // ... to beginning of this match
+        } else {
+            start = last;                // end of this match
+            end = to;                    // ... to end of region
         }
-        return r;
+        return toNegativeMatchResult(start, end);
+    }
+
+    /**
+     * Returns a {@link MatchResult#isNegative negative match result}.
+     * for this matcher, as a {@link MatchResult} which spans the
+     * given indexes within the input sequence of the matcher.  The
+     * result is unaffected by subsequent operations performed upon
+     * this matcher.
+     *
+     * @param  start
+     *         The index to start searching at (inclusive)
+     * @param  end
+     *         The index to end searching at (exclusive)
+     * @throws  IndexOutOfBoundsException
+     *          If start or end is less than zero, if
+     *          start is greater than the length of the input sequence, if
+     *          end is greater than the length of the input sequence, or if
+     *          start is greater than end.
+     * @return  a negative {@code MatchResult} with the given region
+     * @since NN
+     * @see #toNegativeMatchResult(boolean)
+     * @see #resultsWithNegatives()
+     * @see #splits
+     */
+    public MatchResult toNegativeMatchResult(int start, int end) {
+        regionChecks(start, end);
+        String capturedText = start == end ? "" : text.subSequence(start, end).toString();
+        int minStart = -1;  // this signals "no positive match"
+        int[] groups = null;  // this signals "a negative match"
+        return new ImmutableMatchResult(start, end, groupCount(),
+                groups, capturedText, namedGroups(), minStart);
     }
 
     private static class ImmutableMatchResult implements MatchResult {
@@ -324,6 +428,10 @@ public final class Matcher implements MatchResult {
             this.first = first;
             this.last = last;
             this.groupCount = groupCount;
+            // Note: groupCount is necessary to store even if groups
+            // is null, in order for edge cases to be consistent
+            // across normal and negative matches.  But a negative
+            // match never needs to inspect a group other than "$0".
             this.groups = groups;
             this.text = text;
             this.namedGroups = namedGroups;
@@ -340,6 +448,9 @@ public final class Matcher implements MatchResult {
         public int start(int group) {
             checkMatch();
             checkGroup(group);
+            if (isNegative()) {
+                return group == 0 ? first : -1;
+            }
             return groups[group * 2];
         }
 
@@ -353,6 +464,9 @@ public final class Matcher implements MatchResult {
         public int end(int group) {
             checkMatch();
             checkGroup(group);
+            if (isNegative()) {
+                return group == 0 ? last : -1;
+            }
             return groups[group * 2 + 1];
         }
 
@@ -371,6 +485,9 @@ public final class Matcher implements MatchResult {
         public String group(int group) {
             checkMatch();
             checkGroup(group);
+            if (isNegative()) {
+                return group == 0 ? text : null;
+            }
             if ((groups[group * 2] == -1) || (groups[group * 2 + 1] == -1))
                 return null;
             return text.substring(groups[group * 2] - minStart, groups[group * 2 + 1] - minStart);
@@ -383,7 +500,12 @@ public final class Matcher implements MatchResult {
 
         @Override
         public boolean hasMatch() {
-            return first >= 0;
+            return minStart >= 0;
+        }
+
+        @Override
+        public boolean isNegative() {
+            return groups == null;  // it never captures beyond "$0"
         }
 
         private void checkGroup(int group) {
@@ -392,10 +514,13 @@ public final class Matcher implements MatchResult {
         }
 
         private void checkMatch() {
-            if (!hasMatch())
+            if (!hasMatch() && !isNegative())
                 throw new IllegalStateException("No match found");
         }
 
+        @Override public String toString() {
+            return matchResultToString(this);
+        }
     }
 
     /**
@@ -446,6 +571,7 @@ public final class Matcher implements MatchResult {
         first = -1;
         last = 0;
         oldLast = -1;
+        previousMatchLast = 0;
         for(int i=0; i<groups.length; i++)
             groups[i] = -1;
         for(int i=0; i<locals.length; i++)
@@ -761,6 +887,10 @@ public final class Matcher implements MatchResult {
      * not since been reset, at the first character not matched by the previous
      * match.
      *
+     * <p> To prevent repeated matches at the same position, if there
+     * was a previous match and it was of length zero, this method
+     * starts a the character position following the previous match.
+     *
      * <p> If the match succeeds then more information can be obtained via the
      * {@code start}, {@code end}, and {@code group} methods.  </p>
      *
@@ -769,6 +899,7 @@ public final class Matcher implements MatchResult {
      */
     public boolean find() {
         int nextSearchIndex = last;
+        previousMatchLast = nextSearchIndex;
         if (nextSearchIndex == first)
             nextSearchIndex++;
 
@@ -836,13 +967,23 @@ public final class Matcher implements MatchResult {
      *
      * This method produces a {@code String} that will work
      * as a literal replacement {@code s} in the
-     * {@code appendReplacement} method of the {@link Matcher} class.
+     * {@code appendReplacement} method of the {@link Matcher} class,
+     * and to any other method that performs replacement string expansion.
      * The {@code String} produced will match the sequence of characters
-     * in {@code s} treated as a literal sequence. Slashes ('\') and
-     * dollar signs ('$') will be given no special meaning.
+     * in {@code s} treated as a literal sequence. Backslashes ({@code \}) and
+     * dollar signs ({@code $}) will be given no special meaning,
+     * because they will be preceded by additional backslashes.
+     *
+     * <p> Applying the {@link #replacement} method to the result of
+     * {@code quoteReplacement} will return the original string.
      *
      * @param  s The string to be literalized
      * @return  A literal string replacement
+     * @see #appendReplacement
+     * @see #replacement(String)
+     * @see #replaceFirst
+     * @see #replaceAll
+     * @see #replacements
      * @since 1.5
      */
     public static String quoteReplacement(String s) {
@@ -872,7 +1013,8 @@ public final class Matcher implements MatchResult {
      *   that is, the character at index {@link
      *   #start()}&nbsp;{@code -}&nbsp;{@code 1}.  </p></li>
      *
-     *   <li><p> It appends the given replacement string to the string buffer.
+     *   <li><p> It appends the given replacement string to the string buffer,
+     *   as if by a call to {@code sb.append(replacement(replacement))}.
      *   </p></li>
      *
      *   <li><p> It sets the append position of this matcher to the index of
@@ -880,30 +1022,6 @@ public final class Matcher implements MatchResult {
      *   </p></li>
      *
      * </ol>
-     *
-     * <p> The replacement string may contain references to subsequences
-     * captured during the previous match: Each occurrence of
-     * <code>${</code><i>name</i><code>}</code> or {@code $}<i>g</i>
-     * will be replaced by the result of evaluating the corresponding
-     * {@link #group(String) group(name)} or {@link #group(int) group(g)}
-     * respectively. For {@code $}<i>g</i>,
-     * the first number after the {@code $} is always treated as part of
-     * the group reference. Subsequent numbers are incorporated into g if
-     * they would form a legal group reference. Only the numerals '0'
-     * through '9' are considered as potential components of the group
-     * reference. If the second group matched the string {@code "foo"}, for
-     * example, then passing the replacement string {@code "$2bar"} would
-     * cause {@code "foobar"} to be appended to the string buffer. A dollar
-     * sign ({@code $}) may be included as a literal in the replacement
-     * string by preceding it with a backslash ({@code \$}).
-     *
-     * <p> Note that backslashes ({@code \}) and dollar signs ({@code $}) in
-     * the replacement string may cause the results to be different than if it
-     * were being treated as a literal replacement string. Dollar signs may be
-     * treated as references to captured subsequences as described above, and
-     * backslashes are used to escape literal characters in the replacement
-     * string.
-     *
      * <p> This method is intended to be used in a loop together with the
      * {@link #appendTail(StringBuffer) appendTail} and {@link #find() find}
      * methods.  The following code, for example, writes {@code one dog two dogs
@@ -919,6 +1037,10 @@ public final class Matcher implements MatchResult {
      * m.appendTail(sb);
      * System.out.println(sb.toString());</pre></blockquote>
      *
+     * <p> See the documentation for {@link #replaceAll(String)} or
+     * {@link #resultsWithNegatives(int)} for a second alternative,
+     * using a stream instead of a loop.
+     * 
      * @param  sb
      *         The target string buffer
      *
@@ -938,6 +1060,9 @@ public final class Matcher implements MatchResult {
      * @throws  IndexOutOfBoundsException
      *          If the replacement string refers to a capturing group
      *          that does not exist in the pattern
+     *
+     * @see #replacement(String)
+     * @see #replacements(String,int)
      */
     public Matcher appendReplacement(StringBuffer sb, String replacement) {
         checkMatch();
@@ -969,7 +1094,8 @@ public final class Matcher implements MatchResult {
      *   that is, the character at index {@link
      *   #start()}&nbsp;{@code -}&nbsp;{@code 1}.  </p></li>
      *
-     *   <li><p> It appends the given replacement string to the string builder.
+     *   <li><p> It appends the given replacement string to the string builder
+     *   as if by a call to {@code sb.append(replacement(replacement))}.
      *   </p></li>
      *
      *   <li><p> It sets the append position of this matcher to the index of
@@ -977,27 +1103,6 @@ public final class Matcher implements MatchResult {
      *   </p></li>
      *
      * </ol>
-     *
-     * <p> The replacement string may contain references to subsequences
-     * captured during the previous match: Each occurrence of
-     * {@code $}<i>g</i> will be replaced by the result of
-     * evaluating {@link #group(int) group}{@code (}<i>g</i>{@code )}.
-     * The first number after the {@code $} is always treated as part of
-     * the group reference. Subsequent numbers are incorporated into g if
-     * they would form a legal group reference. Only the numerals '0'
-     * through '9' are considered as potential components of the group
-     * reference. If the second group matched the string {@code "foo"}, for
-     * example, then passing the replacement string {@code "$2bar"} would
-     * cause {@code "foobar"} to be appended to the string builder. A dollar
-     * sign ({@code $}) may be included as a literal in the replacement
-     * string by preceding it with a backslash ({@code \$}).
-     *
-     * <p> Note that backslashes ({@code \}) and dollar signs ({@code $}) in
-     * the replacement string may cause the results to be different than if it
-     * were being treated as a literal replacement string. Dollar signs may be
-     * treated as references to captured subsequences as described above, and
-     * backslashes are used to escape literal characters in the replacement
-     * string.
      *
      * <p> This method is intended to be used in a loop together with the
      * {@link #appendTail(StringBuilder) appendTail} and
@@ -1014,6 +1119,10 @@ public final class Matcher implements MatchResult {
      * m.appendTail(sb);
      * System.out.println(sb.toString());</pre></blockquote>
      *
+     * <p> See the documentation for {@link #replaceAll(String)} or
+     * {@link #resultsWithNegatives(int)} for a second alternative,
+     * using a stream instead of a loop.
+     * 
      * @param  sb
      *         The target string builder
      * @param  replacement
@@ -1029,6 +1138,8 @@ public final class Matcher implements MatchResult {
      * @throws  IndexOutOfBoundsException
      *          If the replacement string refers to a capturing group
      *          that does not exist in the pattern
+     * @see #replacement(String)
+     * @see #replacements(String,int)
      * @since 9
      */
     public Matcher appendReplacement(StringBuilder sb, String replacement) {
@@ -1056,90 +1167,127 @@ public final class Matcher implements MatchResult {
         try {
             int cursor = 0;
             while (cursor < replacement.length()) {
-                char nextChar = replacement.charAt(cursor);
-                if (nextChar == '\\') {
-                    cursor++;
-                    if (cursor == replacement.length())
-                        throw new IllegalArgumentException(
-                                "character to be escaped is missing");
-                    nextChar = replacement.charAt(cursor);
-                    app.append(nextChar);
-                    cursor++;
-                } else if (nextChar == '$') {
-                    // Skip past $
-                    cursor++;
-                    // Throw IAE if this "$" is the last character in replacement
-                    if (cursor == replacement.length())
-                        throw new IllegalArgumentException(
-                                "Illegal group reference: group index is missing");
-                    nextChar = replacement.charAt(cursor);
-                    int refNum = -1;
-                    if (nextChar == '{') {
-                        cursor++;
-                        int begin = cursor;
-                        while (cursor < replacement.length()) {
-                            nextChar = replacement.charAt(cursor);
-                            if (ASCII.isLower(nextChar) ||
-                                    ASCII.isUpper(nextChar) ||
-                                    ASCII.isDigit(nextChar)) {
-                                cursor++;
-                            } else {
-                                break;
-                            }
-                        }
-                        if (begin == cursor)
-                            throw new IllegalArgumentException(
-                                    "named capturing group has 0 length name");
-                        if (nextChar != '}')
-                            throw new IllegalArgumentException(
-                                    "named capturing group is missing trailing '}'");
-                        String gname = replacement.substring(begin, cursor);
-                        if (ASCII.isDigit(gname.charAt(0)))
-                            throw new IllegalArgumentException(
-                                    "capturing group name {" + gname +
-                                            "} starts with digit character");
-                        Integer number = namedGroups().get(gname);
-                        if (number == null)
-                            throw new IllegalArgumentException(
-                                    "No group with name {" + gname + "}");
-                        refNum = number;
-                        cursor++;
-                    } else {
-                        // The first number is always a group
-                        refNum = nextChar - '0';
-                        if ((refNum < 0) || (refNum > 9))
-                            throw new IllegalArgumentException(
-                                    "Illegal group reference");
-                        cursor++;
-                        // Capture the largest legal group string
-                        boolean done = false;
-                        while (!done) {
-                            if (cursor >= replacement.length()) {
-                                break;
-                            }
-                            int nextDigit = replacement.charAt(cursor) - '0';
-                            if ((nextDigit < 0) || (nextDigit > 9)) { // not a number
-                                break;
-                            }
-                            int newRefNum = (refNum * 10) + nextDigit;
-                            if (groupCount() < newRefNum) {
-                                done = true;
-                            } else {
-                                refNum = newRefNum;
-                                cursor++;
-                            }
-                        }
-                    }
-                    // Append group
-                    if (start(refNum) != -1 && end(refNum) != -1)
-                        app.append(text, start(refNum), end(refNum));
+                long ij = scanReplacement(replacement, cursor, this);
+                int start = (int)(ij >> 32);
+                cursor = (int)ij;  // low 32 bits is end of scanned token
+                if (start >= 0) {
+                    // Append one or more chars of literal replacement
+                    app.append(replacement, start, cursor);
                 } else {
-                    app.append(nextChar);
-                    cursor++;
+                    // Append group
+                    int refNum = ~start, s, e;
+                    if ((s = start(refNum)) != -1 && (e = end(refNum)) != -1)
+                        app.append(text, s, e);
                 }
             }
         } catch (IOException e) {  // cannot happen on String[Buffer|Builder]
             throw new AssertionError(e.getMessage());
+        }
+    }
+
+    /**
+     * Parses \x or ${x} at cursor in replacement, if possible.
+     * If not possible, skips forward to \ or $ or end, whichever is first.
+     * Returns {@code ((long)i<<32)+j}, where {@code j} is the next cursor value.
+     * If {@code i<0} then {@code -1-i} is a group number to interpolate.
+     * Otherwise, {@code i} is the index of the first character in the
+     * replacement string and {@code j-i} is the length of replacement
+     * characters to interpolate.
+     * <p>
+     * As a boundary condition, return {@code ((long)len<<32)+len} if
+     * cursor does not point at a char of the replacement string.  Otherwise,
+     * it is always the case that {@code j > cursor} and there is either
+     * a group to interpolate or else a non-empty replacment substring.
+     */
+    private static long scanReplacement(String replacement, int cursor, MatchResult mr) {
+        int len = replacement.length();
+        if (cursor < 0 || cursor >= len) {  // end of loop
+            return ((long)len << 32) + len;
+        }
+        char nextChar = replacement.charAt(cursor);
+        if (nextChar == '$') {
+            // Skip past $
+            cursor++;
+            // Throw IAE if this "$" is the last character in replacement
+            if (cursor == len)
+                throw new IllegalArgumentException(
+                        "Illegal group reference: group index is missing");
+            nextChar = replacement.charAt(cursor);
+            int refNum = -1;
+            if (nextChar == '{') {
+                cursor++;
+                int begin = cursor;
+                while (cursor < len) {
+                    nextChar = replacement.charAt(cursor);
+                    if (ASCII.isLower(nextChar) ||
+                            ASCII.isUpper(nextChar) ||
+                            ASCII.isDigit(nextChar)) {
+                        cursor++;
+                    } else {
+                        break;
+                    }
+                }
+                if (begin == cursor)
+                    throw new IllegalArgumentException(
+                            "named capturing group has 0 length name");
+                if (nextChar != '}')
+                    throw new IllegalArgumentException(
+                            "named capturing group is missing trailing '}'");
+                String gname = replacement.substring(begin, cursor);
+                if (ASCII.isDigit(gname.charAt(0)))
+                    throw new IllegalArgumentException(
+                            "capturing group name {" + gname +
+                                    "} starts with digit character");
+                Integer number = mr.namedGroups().get(gname);
+                if (number == null)
+                    throw new IllegalArgumentException(
+                            "No group with name {" + gname + "}");
+                refNum = number;
+                cursor++;
+            } else {
+                // The first number is always a group
+                refNum = nextChar - '0';
+                if ((refNum < 0) || (refNum > 9))
+                    throw new IllegalArgumentException(
+                            "Illegal group reference");
+                cursor++;
+                // Capture the largest legal group string
+                boolean done = false;
+                while (!done) {
+                    if (cursor >= len) {
+                        break;
+                    }
+                    int nextDigit = replacement.charAt(cursor) - '0';
+                    if ((nextDigit < 0) || (nextDigit > 9)) { // not a number
+                        break;
+                    }
+                    int newRefNum = (refNum * 10) + nextDigit;
+                    if (mr.groupCount() < newRefNum) {
+                        done = true;
+                    } else {
+                        refNum = newRefNum;
+                        cursor++;
+                    }
+                }
+            }
+            return (((long)~refNum) << 32) + cursor;
+        } else {
+            int start = cursor;  // start of literal text to copy
+            if (nextChar == '\\') {
+                cursor++;  // skip \ in \xyz but return xyz
+                if (cursor == len)
+                    throw new IllegalArgumentException(
+                            "character to be escaped is missing");
+                start = cursor++;  // be sure to include literal \ or $
+            }
+            while (cursor < len) {
+                nextChar = replacement.charAt(cursor);
+                // skip to end of literal text
+                if (nextChar == '\\' || nextChar == '$')  break;
+                cursor++;
+            }
+            // Return i:j meaning r.substring(i,j).
+            return ((long)start << 32) + cursor;
         }
     }
 
@@ -1193,7 +1341,8 @@ public final class Matcher implements MatchResult {
      * part of any match are appended directly to the result string; each match
      * is replaced in the result by the replacement string.  The replacement
      * string may contain references to captured subsequences as in the {@link
-     * #appendReplacement appendReplacement} method.
+     * #appendReplacement appendReplacement} and {@link #replacement
+     * replacement} methods.
      *
      * <p> Note that backslashes ({@code \}) and dollar signs ({@code $}) in
      * the replacement string may cause the results to be different than if it
@@ -1207,6 +1356,21 @@ public final class Matcher implements MatchResult {
      * {@code "-"}, an invocation of this method on a matcher for that
      * expression would yield the string {@code "-foo-foo-foo-"}.
      *
+     * <p> An invocation of this method on an argument <i>repl</i> has
+     * the same behavior as this stream-based expression:
+     *
+     * <blockquote>
+     * {@link #resultsWithNegatives()
+     * resultsWithNegatives}{@code ()
+     * }<br>&nbsp;&nbsp;&nbsp;&nbsp;{@code
+     *     .map(mr -> mr.}{@link
+     * MatchResult#replacement replacement}{@code (mr.isNegative() ?
+     * "$0" : }<i>repl</i>{@code ))
+     * }<br>&nbsp;&nbsp;&nbsp;&nbsp;{@code
+     *     .collect(}{@link
+     * java.util.stream.Collectors#joining()}{@code ())}
+     * </blockquote>
+     *
      * <p> Invoking this method changes this matcher's state.  If the matcher
      * is to be used in further matching operations then it should first be
      * reset.  </p>
@@ -1217,6 +1381,10 @@ public final class Matcher implements MatchResult {
      * @return  The string constructed by replacing each matching subsequence
      *          by the replacement string, substituting captured subsequences
      *          as needed
+     *
+     * @see #replaceFirst(String)
+     * @see #replacement(String)
+     * @see #replacements(String)
      */
     public String replaceAll(String replacement) {
         reset();
@@ -1245,7 +1413,7 @@ public final class Matcher implements MatchResult {
      * is replaced in the result by the applying the replacer function that
      * returns a replacement string.  Each replacement string may contain
      * references to captured subsequences as in the {@link #appendReplacement
-     * appendReplacement} method.
+     * appendReplacement} and {@link #replacement replacement} methods.
      *
      * <p> Note that backslashes ({@code \}) and dollar signs ({@code $}) in
      * a replacement string may cause the results to be different than if it
@@ -1289,6 +1457,10 @@ public final class Matcher implements MatchResult {
      * @throws ConcurrentModificationException if it is detected, on a
      *         best-effort basis, that the replacer function modified this
      *         matcher's state
+     *
+     * @see #replacement(String)
+     * @see #replacements(String)
+     *
      * @since 9
      */
     public String replaceAll(Function<MatchResult, String> replacer) {
@@ -1311,12 +1483,179 @@ public final class Matcher implements MatchResult {
         return text.toString();
     }
 
+    // helper class for implementing streams that do the find-loop
+    private abstract
+    class MatchStreamIterator<T> implements Iterator<T> {
+        // -ve for call to find, 0 for not found, >0 for found
+        int state = -1;
+        // State for concurrent modification checking
+        // -1 for uninitialized
+        int expectedCount = -1;
+        // how many match attempts to allow, or <0 for no limit
+        int remainingMatches = -1;
+
+        // Hook for producing the next result for the given state (>0).
+        abstract T result();
+
+        @Override
+        public T next() {
+            if (expectedCount >= 0 && expectedCount != modCount)
+                throw new ConcurrentModificationException();
+
+            if (!hasNext())
+                throw new NoSuchElementException();
+
+            state = -1;
+            return result();  // might set state > 0 to report 2nd result
+        }
+
+        // Hook for controlling how find is called.
+        boolean doFind() {
+            int rm = remainingMatches;
+            if (rm == 0) {
+                return false;
+            } else if (rm > 0) {
+                remainingMatches = rm - 1;
+            }
+            return find();
+        }
+
+        @Override
+        public boolean hasNext() {
+            if (state >= 0)
+                return state > 0;
+
+            // Defer throwing ConcurrentModificationException to when next
+            // or forEachRemaining is called.  The is consistent with other
+            // fail-fast implementations.
+            if (expectedCount >= 0 && expectedCount != modCount)
+                return true;
+
+            boolean found = doFind();
+            state = found ? 1 : 0;
+            expectedCount = modCount;
+            return found;
+        }
+
+        @Override
+        public void forEachRemaining(Consumer<? super T> action) {
+            if (expectedCount >= 0 && expectedCount != modCount)
+                throw new ConcurrentModificationException();
+
+            int s = state;
+            if (s == 0)
+                return;
+
+            expectedCount = -1;
+
+            // Perform a first find if required
+            if (s < 0 && !doFind())
+                return;
+
+            do {
+                
+                state = -1;
+                T res = result();  // might set state > 0 to report 2nd result
+                int ec = modCount;
+                action.accept(res);
+                if (ec != modCount)
+                    throw new ConcurrentModificationException();
+            } while (state > 0 || doFind());
+        }
+    }
+
+    // helper subclass for that inserts negative results as well
+    private abstract
+    class MatchWithNegativesIterator extends MatchStreamIterator<MatchResult> {
+        MatchResult nextNegative;
+        MatchResult nextPositive;
+        boolean generatedLastNegative;
+
+        // doFind derives up to two results from one search
+        @Override
+        boolean doFind() {
+            if (!super.doFind())  return false;
+            
+            // we just had a successful find() call; now we set up our state
+            // to record both negative and positive matches, as appropriate
+            nextNegative = toNegativeMatchResult(false);
+            nextPositive = nextPositiveOrNull();
+            if (nextNegative == null && nextPositive == null)  throw new AssertionError();
+            return true;
+        }
+
+        final MatchResult peekResult() {
+            return nextNegative != null ? nextNegative : nextPositive;
+        }
+
+        @Override
+        final MatchResult result() {
+            MatchResult res;
+            if ((res = nextNegative) != null) {
+                nextNegative = null;  // consumed
+                if (nextPositive != null) {
+                    super.state = 1;  // force hasNext to remain true
+                }
+            } else {
+                res = nextPositive;
+                if (res == null)  throw new AssertionError();
+                nextPositive = null;  // consumed
+            }
+            return res;
+        }
+
+        @Override
+        public boolean hasNext() {
+            if (!super.hasNext()) {
+                // this is our chance to return a trailing negative match
+                return checkFinalNegative();
+            }
+            return true;
+        }
+
+        @Override
+        public void forEachRemaining(Consumer<? super MatchResult> action) {
+            super.forEachRemaining(action);
+            // this is our chance to return a trailing negative match
+            if (checkFinalNegative()) {
+                action.accept(result());
+                // Do not bother to check modCount, because there
+                // will be no more queries to this matcher.
+            }
+        }
+
+        // can override to modify behavior
+        MatchResult nextPositiveOrNull() {
+            return toMatchResult();
+        }
+
+        // addendum to hasNext and forEachRemaining:
+        private boolean checkFinalNegative() {
+            if (generatedLastNegative)  return false;
+            generatedLastNegative = true;
+            nextNegative = toNegativeMatchResult(true);
+            return true;
+        }
+    }
+
     /**
      * Returns a stream of match results for each subsequence of the input
      * sequence that matches the pattern.  The match results occur in the
      * same order as the matching subsequences in the input sequence.
      *
      * <p> Each match result is produced as if by {@link #toMatchResult()}.
+     *
+     * <p> If the {@code matchCount} parameter is non-negative, it
+     * limits the number of matches that are attempted.  If the match
+     * count is zero the stream will have no elements.  Thus, the
+     * number of elements in the stream will never be more than the
+     * match count, unless that parameter is negative.
+     *
+     * <p> The {@code matchCount} parameter is optional in the sense
+     * that there is {@linkplain #results() another
+     * overloading of this method} which omits the parameter, and
+     * which behaves as if this method had been passed a negative
+     * match count, removing any limit on matches.
      *
      * <p> This method does not reset this matcher.  Matching starts on
      * initiation of the terminal stream operation either at the beginning of
@@ -1332,73 +1671,88 @@ public final class Matcher implements MatchResult {
      * basis, throw a {@link java.util.ConcurrentModificationException} if such
      * modification is detected.
      *
-     * @return a sequential stream of match results.
-     * @since 9
+     * @param matchCount the maximum number of matches attempted,
+     *        or a negative number directing that matches are unlimited
+     *
+     * @return a sequential stream of match results
+     *
+     * @see #results()
+     *
+     * @since NN
      */
-    public Stream<MatchResult> results() {
-        class MatchResultIterator implements Iterator<MatchResult> {
-            // -ve for call to find, 0 for not found, 1 for found
-            int state = -1;
-            // State for concurrent modification checking
-            // -1 for uninitialized
-            int expectedCount = -1;
-
+    public Stream<MatchResult> results(int matchCount) {
+        class Results extends MatchStreamIterator<MatchResult> {
+            { if (matchCount >= 0)  super.remainingMatches = matchCount; }
             @Override
-            public MatchResult next() {
-                if (expectedCount >= 0 && expectedCount != modCount)
-                    throw new ConcurrentModificationException();
-
-                if (!hasNext())
-                    throw new NoSuchElementException();
-
-                state = -1;
+            MatchResult result() {
                 return toMatchResult();
-            }
-
-            @Override
-            public boolean hasNext() {
-                if (state >= 0)
-                    return state == 1;
-
-                // Defer throwing ConcurrentModificationException to when next
-                // or forEachRemaining is called.  The is consistent with other
-                // fail-fast implementations.
-                if (expectedCount >= 0 && expectedCount != modCount)
-                    return true;
-
-                boolean found = find();
-                state = found ? 1 : 0;
-                expectedCount = modCount;
-                return found;
-            }
-
-            @Override
-            public void forEachRemaining(Consumer<? super MatchResult> action) {
-                if (expectedCount >= 0 && expectedCount != modCount)
-                    throw new ConcurrentModificationException();
-
-                int s = state;
-                if (s == 0)
-                    return;
-
-                // Set state to report no more elements on further operations
-                state = 0;
-                expectedCount = -1;
-
-                // Perform a first find if required
-                if (s < 0 && !find())
-                    return;
-
-                do {
-                    int ec = modCount;
-                    action.accept(toMatchResult());
-                    if (ec != modCount)
-                        throw new ConcurrentModificationException();
-                } while (find());
             }
         }
         return StreamSupport.stream(Spliterators.spliteratorUnknownSize(
-                new MatchResultIterator(), Spliterator.ORDERED | Spliterator.NONNULL), false);
+                new Results(), Spliterator.ORDERED | Spliterator.NONNULL), false);
+    }
+
+    /**
+     * Returns a stream of match results for each subsequence of the input
+     * sequence that matches the pattern.  The match results occur in the
+     * same order as the matching subsequences in the input sequence.
+     *
+     * <p> Each match result is produced as if by {@link #toMatchResult()}.
+     *
+     * <p> This method accepts an optional {@code matchCount}
+     * parameter, in the sense that there is {@linkplain #results(int)
+     * another overloading of this method} which accepts an extra
+     * {@code int} parameter that (if non-negative) imposes a limit on
+     * the number of match attempts.  A call to this method is
+     * equivalent to <code>{@link #results(int) results}(-1)</code>,
+     * which means that, in the absence of a limit argument, no limit
+     * is imposed on the number of match attempts.
+     *
+     * <p> Refer to {@link results(int)} for all additional details
+     * about the behavior of both overloadings of this method.
+     *
+     * <!-- Normally such documentation is duplicated across
+     * overloadings, but that seems excessive in this case. -->
+     *
+     * @return a sequential stream of match results.
+     *
+     * @see #results(int)
+     * @see #nextResult()
+     * @see #replacements(String)
+     *
+     * @since 9
+     */
+    public Stream<MatchResult> results() {
+        return results(-1);
+    }
+
+    /**
+     * Attempts to find the next subsequence of the input sequence that matches
+     * the pattern.  Returns an {@link Optional} object which wraps this
+     * matcher, if there is a match, or else is empty.  This method does
+     * not reset this matcher; therefore, it can be used in a loop to
+     * process multiple matches sequentially.
+     *
+     * <p> This method called on a matcher <i>m</i> has the same
+     * behavior as the following expression:
+     * <i>m</i>{@code .find() ?  Optional.of(}<i>m</i>{@code) :
+     * Optional.empty()}.
+     *
+     * <p> Underneath the {@code Optional} wrapper, a stable copy of
+     * the match can be obtained with {@code
+     * nextResult().map(Matcher::toMatchResult)}, the actual matching
+     * string can be obtained with {@code
+     * nextResult().map(Matcher::group)}, and an expansion of a
+     * replacement string <i>repl</i> can be obtained with {@code
+     * nextResult().map(m -> m.replacement(}<i>repl</i>{@code ))}.
+     *
+     * @return this object, if there is a next match, else the empty value
+     * @since NN
+     * @see String#firstMatch(String)
+     * @see #results(int)
+     */
+    public Optional<Matcher> nextResult() {
+        return find() ? Optional.of(this) : Optional.empty();
     }
 
     /**
@@ -1409,8 +1763,9 @@ public final class Matcher implements MatchResult {
      * sequence looking for a match of the pattern.  Characters that are not
      * part of the match are appended directly to the result string; the match
      * is replaced in the result by the replacement string.  The replacement
-     * string may contain references to captured subsequences as in the {@link
-     * #appendReplacement appendReplacement} method.
+     * string may contain references to captured subsequences as in
+     * the {@link #appendReplacement appendReplacement} and {@link
+     * #replacement replacement} methods.
      *
      * <p>Note that backslashes ({@code \}) and dollar signs ({@code $}) in
      * the replacement string may cause the results to be different than if it
@@ -1424,6 +1779,22 @@ public final class Matcher implements MatchResult {
      * {@code "cat"}, an invocation of this method on a matcher for that
      * expression would yield the string {@code "zzzcatzzzdogzzz"}.  </p>
      *
+     * <p> An invocation of this method on an argument <i>repl</i> has
+     * the same behavior as this stream-based expression:
+     *
+     * <blockquote>
+     * {@link #resultsWithNegatives(int)
+     * resultsWithNegatives}{@code (1)
+     * }<br>&nbsp;&nbsp;&nbsp;&nbsp;{@code
+     *     .map(mr -> mr.}{@link
+     * MatchResult#replacement
+     * replacement}{@code (mr.isNegative() ? "$0" :
+     * }<i>repl</i>{@code )
+     * }<br>&nbsp;&nbsp;&nbsp;&nbsp;{@code
+     *     .collect(}{@link
+     * java.util.stream.Collectors#joining()}{@code )}
+     * </blockquote>
+     *
      * <p> Invoking this method changes this matcher's state.  If the matcher
      * is to be used in further matching operations then it should first be
      * reset.  </p>
@@ -1433,6 +1804,10 @@ public final class Matcher implements MatchResult {
      * @return  The string constructed by replacing the first matching
      *          subsequence by the replacement string, substituting captured
      *          subsequences as needed
+     *
+     * @see #replaceAll(String)
+     * @see #replacement(String)
+     * @see #replacements(String,int)
      */
     public String replaceFirst(String replacement) {
         if (replacement == null)
@@ -1458,7 +1833,8 @@ public final class Matcher implements MatchResult {
      * is replaced in the result by the applying the replacer function that
      * returns a replacement string.  The replacement string may contain
      * references to captured subsequences as in the {@link #appendReplacement
-     * appendReplacement} method.
+     * appendReplacement} and {@link #replacement replacement}
+     * methods.
      *
      * <p>Note that backslashes ({@code \}) and dollar signs ({@code $}) in
      * the replacement string may cause the results to be different than if it
@@ -1502,6 +1878,8 @@ public final class Matcher implements MatchResult {
      * @throws ConcurrentModificationException if it is detected, on a
      *         best-effort basis, that the replacer function modified this
      *         matcher's state
+     * @see #replacements(String,int)
+     * @see #results(int)
      * @since 9
      */
     public String replaceFirst(Function<MatchResult, String> replacer) {
@@ -1517,6 +1895,574 @@ public final class Matcher implements MatchResult {
         appendReplacement(sb, replacement);
         appendTail(sb);
         return sb.toString();
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @see #appendReplacement
+     * @see #replaceFirst(String)
+     * @see #replaceAll(String)
+     * @see #replacements(String,int)
+     */
+    public String replacement(String replacement) {
+        return expandReplacement(this, replacement);
+    }
+
+    // not public; used locally in a few places including MatchResult
+    static String expandReplacement(MatchResult mr, String replacement) {
+        int len = replacement.length();
+        if (len == 0)  return replacement;
+        int cursor = 0;
+        StringBuilder sb = null;
+        while (cursor < len) {
+            long ij = scanReplacement(replacement, cursor, mr);
+            int start = (int)(ij >> 32);
+            cursor = (int)ij;  // low 32 bits is end of scanned token
+            if (sb == null) {
+                if (cursor < len) {
+                    sb = new StringBuilder();
+                } else if (start >= 0) {
+                    // common case: constant replacement string
+                    return replacement.substring(start);
+                } else {
+                    // common case: single group reference
+                    int refNum = ~start;
+                    String g = mr.group(refNum);
+                    return g == null ? "" : g;
+                }
+            }
+            if (start >= 0) {
+                // Append one or more chars of literal replacement
+                sb.append(replacement, start, cursor);
+            } else {
+                // Append group
+                int refNum = ~start;
+                String g = mr.group(refNum);
+                sb.append(g == null ? "" : g);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Returns a stream of replacements for each subsequence of the input
+     * sequence that matches the pattern.  The replacements occur in the
+     * same order as the matching subsequences in the input sequence.
+     * The stream is not reset before this operation, so matches that
+     * have already been found do not contribute to the resulting stream.
+     *
+     * <p> The replacements are produced as if by repeated calls to
+     * {@link #find() the find method}.  Each match is used to expand
+     * the replacement string, and the expansion is added to the
+     * stream.  For example, if the replacement string is {@code "$0"}
+     * then the matching substring itself would be added to the
+     * stream.  Likewise, if the replacement string is {@code "hello"}
+     * then the stream contains a reference to that constant string
+     * for each match, and a call to {@link Stream#count()} would
+     * return the number of matches.
+     * 
+     * <p>Note that backslashes ({@code \}) and dollar signs ({@code $}) in
+     * the replacement string may cause the results to be different than if it
+     * were being treated as a literal replacement string. Dollar signs may be
+     * treated as references to captured subsequences as described above, and
+     * backslashes are used to escape literal characters in the replacement
+     * string.
+     *
+     * <p> The resulting stream has the same behavior as this stream,
+     * which inspects the match results as intermediate values and
+     * repeatedly expands the given replacement string:
+     *
+     * <blockquote><pre>{@code
+     * // these two streams have the same behavior:
+     * this.replacements(repl) ...
+     * this.results().map(mr -> mr.replacement(repl)) ...
+     * }</pre></blockquote>
+     *
+     * <p> A stream based on this method may be more efficient than a
+     * more general-purpose stream based on {@code results()}.  If the
+     * replacement string is a simple group reference (or a simple
+     * constant string), a stream which directly extracts the group
+     * (or repeats the constant string) has the same behavior as well,
+     * and the performance is likely to be comparable or better:
+     *
+     * <blockquote><pre>{@code
+     * // these two streams have the same behavior:
+     * this.replacements("${42}") ...
+     * this.results().map(mr -> mr.group(42)) ...
+     * // these two streams have the same behavior:
+     * this.replacements("$0") ...
+     * this.results().map(MatchResult::group) ...
+     * // these two streams have the same behavior:
+     * this.replacements("free = \\$0") ...
+     * this.results().map(mr -> "free = $0") ...
+     * }</pre></blockquote>
+     *
+     * <p> If the {@code matchCount} parameter is non-negative, it
+     * limits the number of matches that are attempted.  If the match
+     * count is zero the stream will have no elements.  Thus, the
+     * number of elements in the stream will never be more than the
+     * match count, unless that parameter is negative.
+     *
+     * <p> The {@code matchCount} parameter is optional in the sense
+     * that there is {@linkplain #replacements(String) another overloading
+     * of this method} which omits that parameter, and which behaves as
+     * if this method had been passed a negative match count, removing
+     * any limit on matches.
+     *
+     * <p> This method does not reset this matcher.  Matching starts on
+     * initiation of the terminal stream operation either at the beginning of
+     * this matcher's region, or, if the matcher has not since been reset, at
+     * the first character not matched by a previous match.
+     *
+     * <p> If the matcher is to be used for further matching operations after
+     * the terminal stream operation completes then it should be first reset.
+     *
+     * <p> This matcher's state should not be modified during execution of the
+     * returned stream's pipeline.  The returned stream's source
+     * {@code Spliterator} is <em>fail-fast</em> and will, on a best-effort
+     * basis, throw a {@link java.util.ConcurrentModificationException} if such
+     * modification is detected.
+     *
+     * @param  replacement
+     *         the replacement string to expand for each match encountered
+     * @param matchCount the maximum number of matches attempted,
+     *        or a negative number directing that matches are unlimited
+     * @return a sequential stream of match replacements
+     * @see #replacements(String)
+     * @see #replacement(String)
+     * @see #replaceFirst(String)
+     * @see #replaceAll(String)
+     * @see #results(int)
+     * @since NN
+     */
+    public Stream<String> replacements(String replacement, int matchCount) {
+        long ij = scanReplacement(replacement, 0, this);
+        boolean isSimple = (int)ij == replacement.length();
+        MatchStreamIterator<String> iter;
+        if (isSimple && ij < 0) {
+            // common case: whole replacement is single group "$0", "${1}", "${foo}", etc.
+            int refNum = ~(int)(ij >> 32);
+            class Groups extends MatchStreamIterator<String> {
+                @Override
+                String result() {
+                    String g = group(refNum);
+                    return g == null ? "" : g;
+                }
+            }
+            iter = new Groups();
+        } else if (isSimple || replacement.indexOf('$') < 0) {
+            // replacement is a constant string, perhaps with embedded '\' escapes
+            // (The null argument proves that we do not peek at groups; it is just literal text.)
+            String constantRepl = expandReplacement(null, replacement);
+            class Constants extends MatchStreamIterator<String> {
+                @Override
+                String result() {
+                    return constantRepl;  // all matches replaced with constant string
+                }
+            }
+            iter = new Constants();
+        } else {
+            // general case; just use replacement to interpret the string
+            // (There might be a group reference and we don't bother
+            // to completely pre-parse the string to find out if it's in there.)
+            class Replacements extends MatchStreamIterator<String> {
+                @Override
+                String result() {
+                    // expand it every time, for every match
+                    return replacement(replacement);
+                }
+            }
+            iter = new Replacements();
+        }
+        // enforce the match count, if one is present
+        if (matchCount >= 0) {
+            iter.remainingMatches = matchCount;
+        }
+        return StreamSupport.stream(Spliterators.spliteratorUnknownSize(
+                iter, Spliterator.ORDERED | Spliterator.NONNULL), false);
+    }
+
+    /**
+     * Returns a stream of replacements for each subsequence of the input
+     * sequence that matches the pattern.  The replacements occur in the
+     * same order as the matching subsequences in the input sequence.
+     * The stream is not reset before this operation, so matches that
+     * have already been found do not contribute to the resulting stream.
+     *
+     * <p> This method accepts an optional {@code matchCount}
+     * parameter, in the sense that there is {@linkplain
+     * #replacements(String,int) another overloading of this method} which
+     * accepts an extra {@code int} parameter that (if non-negative)
+     * imposes a limit on the number of match attempts.  A call to
+     * this method is equivalent to <code>{@link #replacements(String,int)
+     * replacements}(repl,-1)</code>, which means that, in the absence of a
+     * limit argument, no limit is imposed on the number of match
+     * attempts.
+     *
+     * <p> Refer to {@link replacements(String,int)} for all additional
+     * details about the behavior of both overloadings of this method.
+     *
+     * <!-- Normally such documentation is duplicated across
+     * overloadings, but that seems excessive in this case. -->
+     *
+     * @param  replacement
+     *         the replacement string to expand for each match encountered
+     * @return a sequential stream of match replacements
+     * @see #replacements(String,int)
+     * @see #results()
+     * @see #replaceFirst(String)
+     * @see #replaceAll(String)
+     * @see #replacement(String)
+     * @see #quoteReplacement
+     * @since NN
+     */
+    public Stream<String> replacements(String replacement) {
+        return replacements(replacement, -1);
+    }
+
+    /**
+     * Returns a stream of match results for each subsequence of the
+     * input sequence that matches the pattern, with intervening
+     * subsequences that do <i>not</i> match also reported as {@link
+     * #toNegativeMatchResult negative match results}.  Subsequences
+     * that <i>do</i> match are reported as regular match results,
+     * which (as distinguished from negative results) are also called
+     * <i>positive</i> match results.
+     *
+     * <p> The match results occur in the same order as the matching
+     * subsequences in the input sequence.  The match results (both
+     * positive and negative) exhaustively partition the input
+     * sequence.  Thus, each character of the input sequence falls in
+     * the span of exactly one match result, either positive or
+     * negative.
+     *
+     * <p> The sequence of positive elements of this stream are
+     * identical to the whole sequence of elements in {@link
+     * #results(int) results}, when both methods are provided with the
+     * same match count option.
+     *
+     * <p> Each match result is produced as if by {@link #toMatchResult()}
+     * or (for negative results) by {@link #toNegativeMatchResult}.
+     *
+     * <p> If the first match occurs after the position at which
+     * matching starts, a negative match is reported as the first
+     * element of the stream, from that beginning position through the
+     * start of the first match.  If the last match does not end with
+     * the input sequence itself, a negative match is reported between
+     * the end of the last match and the end of the input sequence.
+     * If there are no matches, the stream contains a single negative
+     * match of the input sequence as a whole, unless the input
+     * sequence as a whole is empty, in which case there are no stream
+     * elements at all.
+     *
+     * <p> If the {@code matchCount} parameter is non-negative, it
+     * limits the number of matches are attempted, and the last
+     * negative match result may possibly contain additional matches
+     * for the pattern, not attempted because of the limit.  If the
+     * match count is zero, no matches are attempted, and the result
+     * stream will consist of one negative match result for the whole
+     * input sequence, unless it is empty, in which case the result
+     * stream will have no elements at all.  Thus, the number of
+     * regular (non-negative) elements in the stream will never be
+     * more than the match count, unless that parameter is negative.
+     *
+     * <p> The {@code matchCount} parameter is optional in the sense
+     * that there is {@linkplain #resultsWithNegatives() another
+     * overloading of this method} which omits the parameter, and
+     * which behaves as if this method had been passed a negative
+     * match count, removing any limit on matches.
+     *
+     * <p> This method can be used to gain finer control over the
+     * replacement of matches within the input sequence, beyond the
+     * capabilities of {@link #replaceFirst} and {@link #replaceAll}.
+     * The following example code shows how to use this stream to replace the first
+     * <i>N</i> matches with a given replacement <i>R</i>:
+     *
+     * <blockquote>{@code
+     * match.resultsWithNegatives(N)
+     * }<br>&nbsp;&nbsp;&nbsp;&nbsp;{@code
+     *     .map(m -> m.isNegative() ? m.group() : m.replacement(repl))
+     * }<br>&nbsp;&nbsp;&nbsp;&nbsp;{@code
+     *     .collect(Collectors.joining())
+     * }</blockquote>
+     *
+     * <p> This method does not reset this matcher.  Matching starts on
+     * initiation of the terminal stream operation either at the beginning of
+     * this matcher's region, or, if the matcher has not since been reset, at
+     * the first character not matched by a previous match.
+     *
+     * <p> If the matcher is to be used for further matching operations after
+     * the terminal stream operation completes then it should be first reset.
+     *
+     * <p> This matcher's state should not be modified during execution of the
+     * returned stream's pipeline.  The returned stream's source
+     * {@code Spliterator} is <em>fail-fast</em> and will, on a best-effort
+     * basis, throw a {@link java.util.ConcurrentModificationException} if such
+     * modification is detected.
+     *
+     * <p> The results from this method are similar to those produced
+     * by <a href="Pattern.html#split">splitting methods</a> where the
+     * {@code withDelimiters} option is {@code true}, in that they
+     * consist of a mix of positive and negative matches.  Like the
+     * splitting methods, there is always an odd number of results
+     * containing a regular odd/even alternation between positive and
+     * negative matches.  Below the optional match count limit,
+     * positive matches are never discarded, not even a leading
+     * zero-length match.  One negative match always precedes and
+     * follows every positive match.
+     *
+     * <p> Both methods support an optional match count limit.  For a
+     * split method, the {@code limit} parameter corresponds to the
+     * {@code matchCount} parameter of this method, except that a
+     * positive {@code limit} of <i>N</i><code>&nbsp;+&nbsp;1</code>
+     * has the same limiting effect as a non-negative {@code
+     * matchCount} of <i>N</i>.  For both kinds of methods, a negative
+     * {@code limit} or {@code matchCount} requests unlimited match
+     * attempts.  A {@code limit} of zero has a special meaning
+     * specific to split methods, but for this method simply specifies
+     * that no matches are to be attempted.
+     *
+     * @param matchCount the maximum number of matches attempted,
+     *        or a negative number directing that matches are unlimited
+     *
+     * @return a sequential stream of alternating negative and positive match results
+     *
+     * @see MatchResult#isNegative()
+     * @see #resultsWithNegatives(int)
+     * @see #results(int)
+     * @see #splits(int,boolean)
+     * @see Pattern#splitWithDelimiters(CharSequence,int)
+     *
+     * @since NN
+     */
+    public Stream<MatchResult> resultsWithNegatives(int matchCount) {
+        class ResultsWithNegatives extends MatchWithNegativesIterator {
+            { if (matchCount >= 0)  super.remainingMatches = matchCount; }
+        }
+        return StreamSupport.stream(Spliterators.spliteratorUnknownSize(
+                new ResultsWithNegatives(), Spliterator.ORDERED | Spliterator.NONNULL), false);
+    }
+
+    /**
+     * Returns a stream of match results for each subsequence of the
+     * input sequence that matches the pattern, with intervening
+     * subsequences that do <i>not</i> match also reported as
+     * {@link #toNegativeMatchResult negative match results}.
+     *
+     * <p> This method accepts an optional {@code matchCount}
+     * parameter, in the sense that there is {@linkplain
+     * #resultsWithNegatives(int) another overloading of this method}
+     * which accepts an extra {@code int} parameter that (if
+     * non-negative) imposes a limit on the number of match attempts.
+     * A call to this method is equivalent to <code>{@link
+     * #resultsWithNegatives(int) resultsWithNegatives}(-1)</code>,
+     * which means that, in the absence of a limit argument, no limit
+     * is imposed on the number of match attempts.
+     *
+     * <p> Refer to {@link resultsWithNegatives(int)} for all
+     * additional details about the behavior of both overloadings of
+     * this method.
+     *
+     * <!-- Normally such documentation is duplicated across
+     * overloadings, but that seems excessive in this case. -->
+     *
+     * @return a sequential stream of match results, both regular and negative
+     *
+     * @see MatchResult#isNegative()
+     * @see #resultsWithNegatives(int)
+     * @see #results()
+     * @see #splits(int,boolean)
+     * @see Pattern#splitWithDelimiters(CharSequence,int)
+     *
+     * @since NN
+     */
+    public Stream<MatchResult> resultsWithNegatives() {
+        return resultsWithNegatives(-1);
+    }
+
+    /**
+     * Splits the input sequence around matches of the given regular
+     * expression and returns the unmatched strings and, optionally,
+     * the matching delimiters.  Subsequences containing matched
+     * delimiters, if present, are represented as regular match
+     * results, as if from {@link #toMatchResult()}.  Non-matching
+     * subsequences of delimited text are represented as negative
+     * match results, as if from {@link #toNegativeMatchResult}.
+     *
+     * <p> The two kinds of match results can be distinguished by
+     * {@link MatchResult#isNegative isNegative}.  The strings and
+     * locations of all of the match results can be obtained using
+     * {@link MatchResult#group() the group method} or other methods
+     * of {@link MatchResult}.
+     *
+     * <p> If the {@code withDelimiters} parameter is {@code false},
+     * when creating the stream, all regular match results are
+     * removed, leaving only the negative results.  This is the
+     * classic "split" behavior, which reports only runs of
+     * non-matching input text.
+     *
+     * <p> This method does not reset this matcher.  Matching starts on
+     * initiation of the terminal stream operation either at the beginning of
+     * this matcher's region, or, if the matcher has not since been reset, at
+     * the first character not matched by a previous match.
+     *
+     * <p> If the matcher is to be used for further matching operations after
+     * the terminal stream operation completes then it should be first reset.
+     *
+     * <p> This matcher's state should not be modified during execution of the
+     * returned stream's pipeline.  The returned stream's source
+     * {@code Spliterator} is <em>fail-fast</em> and will, on a best-effort
+     * basis, throw a {@link java.util.ConcurrentModificationException} if such
+     * modification is detected.
+     *
+     * <p> The {@code limit} parameter controls the number of times the
+     * pattern is applied and therefore affects the length of the resulting
+     * stream.
+     * <ul>
+     *    <li> If the <i>limit</i> is positive then the pattern will
+     *    be applied at most <i>limit</i>&nbsp;-&nbsp;1 times and
+     *    streams's last element will contain all input beyond the
+     *    last matched delimiter.</li>
+     *
+     *    <li> If the <i>limit</i> is zero or negative then the
+     *    pattern will be applied as many times as possible and the
+     *    stream's length is not limited.</li>
+     *
+     *    <li> If the <i>limit</i> is exactly zero then trailing empty
+     *    match results, whether negative or regular (if present),
+     *    will be discarded.</li>
+     *
+     *    <li> If {@code withDelimiters} is {@code false} and
+     *    <i>limit</i> is positive, the streams's length will be no
+     *    greater <i>limit</i>.</li>
+     *
+     *    <li> If {@code withDelimiters} is {@code true} and
+     *    <i>limit</i> is non-zero, the streams's length will be an
+     *    odd number, because the matching and non-matching results
+     *    alternate, with one extra non-match.  If <i>limit</i> is
+     *    positive, the length will be no greater than
+     *    2&nbsp;&times;&nbsp;<i>limit</i>&nbsp;-&nbsp;1.</li>
+     *
+     * </ul>
+     *
+     * <p> This is a <a href="Pattern.html#split">splitting method</a>
+     * that follows a set of historically determined rules in common
+     * with other splitting methods.  A full discussion of those rules
+     * is <a href="Pattern.html#split">available elsewhere</a>.
+     *
+     * @param  limit
+     *         one more than the maximum number of delimiters matched,
+     *         if positive, or an indication to discard trailing empty
+     *         results, if zero
+     * @param  withDelimiters
+     *         if {@code true} include results for delimiters
+     *
+     * @return a sequential stream of negative match results,
+     *         possibly alternating with regular match results as well
+     *
+     * @see #results(int)
+     * @see MatchResult#isNegative()
+     * @see Pattern#splitAsStream(CharSequence)
+     * @see Pattern#splitWithDelimiters(CharSequence,int)
+     * @see <a href="Pattern.html#split">rules for methods that split using a pattern</a>
+     *
+     * @since NN
+     */
+    public Stream<MatchResult> splits(int limit, boolean withDelimiters) {
+        class Splits extends MatchWithNegativesIterator {
+            @Override MatchResult nextPositiveOrNull() {
+                // maybe drop positives
+                if (!withDelimiters)  return null;
+                return super.nextPositiveOrNull();
+            }
+            @Override
+            boolean doFind() {
+                if (last == previousMatchLast) {
+                    int rm = super.remainingMatches;  // checkpoint match limit
+                    if (!super.doFind())  return false;
+                    if (last > previousMatchLast)  return true;
+                    // skip first two elements that are -empty, +empty
+                    super.remainingMatches = rm;  // this one did not count
+                    // and fall through to a second match
+                }
+                return super.doFind();
+            }
+        }
+        MatchWithNegativesIterator iter;
+        if (limit != 0) {
+            iter = new Splits();
+        } else {
+            // We need extra logic to strip trailing empty match results.
+            class ElideEmptiesIterator extends Splits {
+                // worst case is withDelimiters=false and many consecutive delims
+                // e.g., "::::::::::::::::::::".split(":",-1)
+                final ArrayList<MatchResult> empties = new ArrayList<>();
+
+                @Override
+                public MatchResult next() {
+                    if (!empties.isEmpty()) {
+                        return empties.remove(0);
+                    }
+                    return super.next();
+                }
+
+                @Override
+                public boolean hasNext() {
+                    if (!empties.isEmpty()) {
+                        return true;
+                    }
+                    if (!super.hasNext()) {
+                        return false;
+                    }
+                    // search for non-empty result to justify returning empties
+                    for (;;) {
+                        MatchResult mr = peekResult();
+                        int start = mr.start();
+                        if (start != mr.end()) {
+                            // We found a justification for all our empties.
+                            // The caller will call next() and see them.
+                            return true;
+                        }
+                        if (start == previousMatchLast && start == to) {
+                            // If the input is an empty string then
+                            // the result can only be a stream of the
+                            // input.  Induce that by reporting an
+                            // empty trailing negative.
+                            return true;  // this is the only trailing empty possible
+                        }
+                        empties.add(mr);
+                        MatchResult nmr = next();  // advance past the empty
+                        if (mr != nmr)  throw new AssertionError();
+                        if (!super.hasNext()) {
+                            empties.clear();
+                            return false;
+                        }
+                    }
+                }
+
+                @Override
+                public void forEachRemaining(Consumer<? super MatchResult> action) {
+                    super.forEachRemaining(mr -> {
+                            if (mr.start() == mr.end()) {
+                                empties.add(mr);
+                                return;
+                            }
+                            // found a non-empty item; first clear previous empties
+                            for (int s = empties.size(); s > 0; ) {
+                                action.accept(empties.remove(--s));
+                            }
+                            action.accept(mr);
+                        });
+                }
+            }
+            iter = new ElideEmptiesIterator();
+        }
+        if (limit > 0) {
+            iter.remainingMatches = limit - 1;
+        }
+        return StreamSupport.stream(Spliterators.spliteratorUnknownSize(
+                iter, Spliterator.ORDERED | Spliterator.NONNULL), false);
     }
 
     /**
@@ -1545,16 +2491,44 @@ public final class Matcher implements MatchResult {
      * @since 1.5
      */
     public Matcher region(int start, int end) {
+        regionChecks(start, end);
+        reset();
+        from = start;
+        to = end;
+        previousMatchLast = start;
+        return this;
+    }
+
+    /**
+     * Sets the lower limit of this matcher's region. The region is the part of the
+     * input sequence that will be searched to find a match. Invoking this
+     * method resets the matcher, and then sets the region to start at the
+     * index specified by the {@code start} parameter.  The region end is
+     * unchanged.
+     *
+     * The expression {@code m.region(start)} equivalent to the
+     * expression {@code m.}{@link #region(int,int)
+     * region}{@code (start, m.}{@link #regionEnd()}{@code )}
+     *
+     * @param  start
+     *         The index to start searching at (inclusive)
+     * @throws  IndexOutOfBoundsException
+     *          If start is less than zero, if
+     *          start is greater than the end of the region.
+     * @return  this matcher
+     * @since NN
+     */
+    public Matcher region(int start) {
+        return region(start, to);
+    }
+
+    private void regionChecks(int start, int end) {
         if ((start < 0) || (start > getTextLength()))
             throw new IndexOutOfBoundsException("start");
         if ((end < 0) || (end > getTextLength()))
             throw new IndexOutOfBoundsException("end");
         if (start > end)
             throw new IndexOutOfBoundsException("start > end");
-        reset();
-        from = start;
-        to = end;
-        return this;
     }
 
     /**
@@ -1703,6 +2677,23 @@ public final class Matcher implements MatchResult {
         return sb.toString();
     }
 
+    // non-public default code for MatchResult
+    static String matchResultToString(MatchResult mr) {
+        boolean isneg = mr.isNegative();
+        if (!isneg && !mr.hasMatch()) {
+            return "MatchResult[none]";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("MatchResult[")
+            .append("start=").append(mr.start())
+            .append(isneg ? " skip=" : " match=");
+        if (mr.group() != null) {
+            sb.append(mr.group());
+        }
+        sb.append(']');
+        return sb.toString();
+    }
+
     /**
      * <p>Returns true if the end of input was hit by the search engine in
      * the last match operation performed by this matcher.
@@ -1747,7 +2738,8 @@ public final class Matcher implements MatchResult {
      * is the "soft" boundary of the start of the search, meaning that the
      * regex tries to match at that index but ^ won't match there. Subsequent
      * calls to the search methods start at a new "soft" boundary which is
-     * the end of the previous match.
+     * the end of the previous match, or one character beyond that if the
+     * previous match was to the empty string.
      */
     boolean search(int from) {
         this.hitEnd = false;
